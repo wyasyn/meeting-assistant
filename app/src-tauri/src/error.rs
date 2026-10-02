@@ -28,6 +28,9 @@ pub enum AppError {
     NotFound(String),
     #[error("{0}")]
     SidecarDown(String),
+    /// The action does not fit the current state, e.g. stop while not recording.
+    #[error("{0}")]
+    InvalidState(String),
     #[error("{INTERNAL_MESSAGE}")]
     Internal,
 }
@@ -50,6 +53,7 @@ impl AppError {
             Self::InvalidLlmOutput(_) => "invalid_llm_output",
             Self::NotFound(_) => "not_found",
             Self::SidecarDown(_) => "sidecar_down",
+            Self::InvalidState(_) => "invalid_state",
             Self::Internal => "internal",
         }
     }
@@ -107,6 +111,7 @@ mod tests {
             ),
             (AppError::NotFound(msg()), "not_found", false),
             (AppError::SidecarDown(msg()), "sidecar_down", true),
+            (AppError::InvalidState(msg()), "invalid_state", false),
         ];
         for (error, code, retryable) in cases {
             let value = serde_json::to_value(&error).unwrap();

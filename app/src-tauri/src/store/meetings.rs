@@ -95,6 +95,13 @@ impl<'a> MeetingRepo<'a> {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// Removes a meeting that never got any audio (a start that failed).
+    pub fn delete(&self, id: &str) -> Result<(), StoreError> {
+        self.conn
+            .execute("DELETE FROM meetings WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
     pub fn status(&self, id: &str) -> Result<Option<String>, StoreError> {
         Ok(self
             .conn
@@ -135,5 +142,7 @@ mod tests {
             .unwrap();
         assert_eq!((ended_at, duration_s), (61_000, 60));
         assert_eq!(repo.status("missing").unwrap(), None);
+        repo.delete(&a.id).unwrap();
+        assert_eq!(repo.status(&a.id).unwrap(), None);
     }
 }

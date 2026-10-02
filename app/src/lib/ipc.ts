@@ -14,6 +14,7 @@ export const APP_ERROR_CODES = [
   "invalid_llm_output",
   "not_found",
   "sidecar_down",
+  "invalid_state",
   "internal",
 ] as const;
 
@@ -84,6 +85,75 @@ export function getSettings(): Promise<Settings> {
 /** Applies `settings` and resolves to the settings now in effect. */
 export function setSettings(settings: Settings): Promise<Settings> {
   return call<Settings>("set_settings", { settings });
+}
+
+/** Mirrors Rust `recording::MeetingSummary`. Times are epoch ms (UTC). */
+export interface MeetingSummary {
+  id: string;
+  title: string;
+  sourceApp: string;
+  startedAt: number;
+  endedAt: number | null;
+  durationS: number | null;
+  status: string;
+}
+
+/** `idle` means no recording since the app started. */
+export type RecordingPhase = "idle" | "recording" | "paused" | "stopped";
+
+/** Mirrors Rust `recording::RecordingState`; also the `recording:state` payload. */
+export interface RecordingState {
+  meetingId: string | null;
+  state: RecordingPhase;
+  elapsedMs: number;
+  /** Why a recording stopped by itself, readable. */
+  error: string | null;
+}
+
+/** `recording:levels` payload, dBFS from -90 to 0. `null`: no audio from that device. */
+export interface RecordingLevels {
+  micDb: number | null;
+  sysDb: number | null;
+}
+
+/** Mirrors Rust `capture::AudioDevice`. */
+export interface AudioDevice {
+  id: string;
+  name: string;
+  kind: "input" | "output";
+  isDefault: boolean;
+}
+
+export function startRecording(args: { title?: string; sourceApp?: string } = {}) {
+  return call<MeetingSummary>("start_recording", args);
+}
+
+export function pauseRecording() {
+  return call<RecordingState>("pause_recording");
+}
+
+export function resumeRecording() {
+  return call<RecordingState>("resume_recording");
+}
+
+export function stopRecording() {
+  return call<RecordingState>("stop_recording");
+}
+
+export function getRecordingState() {
+  return call<RecordingState>("get_recording_state");
+}
+
+export function listAudioDevices() {
+  return call<AudioDevice[]>("list_audio_devices");
+}
+
+export function onRecordingState(handler: (state: RecordingState) => void) {
+  return on<RecordingState>("recording:state", handler);
+}
+
+export function onRecordingLevels(handler: (levels: RecordingLevels) => void) {
+  return on<RecordingLevels>("recording:levels", handler);
 }
 
 /** Listens to an event and passes only its payload. Resolves to the unlisten function. */

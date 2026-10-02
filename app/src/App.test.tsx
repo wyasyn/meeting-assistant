@@ -2,10 +2,17 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import App from "@/App";
 import { APP_NAME } from "@/config";
+import { getRecordingState, onRecordingLevels, onRecordingState } from "@/lib/ipc";
 
 vi.mock("@/lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/ipc")>()),
   getSettings: vi.fn(() => Promise.resolve({ startOnLogin: false })),
+  getRecordingState: vi.fn(() =>
+    Promise.resolve({ meetingId: null, state: "idle", elapsedMs: 0, error: null }),
+  ),
+  listAudioDevices: vi.fn(() => Promise.resolve([])),
+  onRecordingState: vi.fn(() => Promise.resolve(() => undefined)),
+  onRecordingLevels: vi.fn(() => Promise.resolve(() => undefined)),
 }));
 
 describe("App", () => {
@@ -14,9 +21,12 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: APP_NAME })).toBeInTheDocument();
   });
 
-  // FR-1.3: nothing can start a recording until consent and capture exist.
-  it("keeps the record button disabled", () => {
+  // Rule 1: nothing records on its own; the window only offers the button.
+  it("offers to start a recording and follows the recording state", () => {
     render(<App />);
-    expect(screen.getByRole("button", { name: /recording/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Start recording" })).toBeEnabled();
+    expect(getRecordingState).toHaveBeenCalled();
+    expect(onRecordingState).toHaveBeenCalled();
+    expect(onRecordingLevels).toHaveBeenCalled();
   });
 });

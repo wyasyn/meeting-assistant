@@ -6,9 +6,12 @@ mod jobs;
 mod logging;
 mod metrics;
 mod providers;
+mod recording;
 mod sidecar;
 pub mod store;
 mod tray;
+
+use std::sync::Arc;
 
 use tauri::Manager;
 
@@ -39,7 +42,14 @@ pub fn run() {
             if let Err(err) = capture::recovery::recover(&db, &data_dir) {
                 tracing::error!(%err, "could not recover interrupted recordings");
             }
-            app.manage(db);
+            let db = Arc::new(db);
+            app.manage(Arc::clone(&db));
+            app.manage(recording::RecordingService::new(
+                capture::default_backend(),
+                db,
+                data_dir.clone(),
+                Arc::new(commands::recording::TauriEvents(app.handle().clone())),
+            ));
 
             tray::init(app.handle())?;
             if !std::env::args().any(|arg| arg == MINIMIZED_ARG) {
@@ -61,6 +71,12 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::settings::get_settings,
             commands::settings::set_settings,
+            commands::recording::start_recording,
+            commands::recording::pause_recording,
+            commands::recording::resume_recording,
+            commands::recording::stop_recording,
+            commands::recording::get_recording_state,
+            commands::recording::list_audio_devices,
         ])
         .build(tauri::generate_context!());
 
@@ -68,6 +84,10 @@ pub fn run() {
         Ok(app) => app.run(|handle, event| {
             if let tauri::RunEvent::Exit = event {
                 tracing::info!("app exiting");
+                // Save a running recording before the process ends (rule 3).
+                if let Some(service) = handle.try_state::<recording::RecordingService>() {
+                    service.shutdown();
+                }
                 if let Some(guard) = handle.try_state::<logging::LogGuard>() {
                     guard.flush();
                 }

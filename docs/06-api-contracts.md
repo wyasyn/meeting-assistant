@@ -5,8 +5,8 @@ Names here are the contract between UI, core, sidecar and providers. Changing on
 ## Tauri commands (UI → core)
 | Command | Args | Returns | Req |
 | --- | --- | --- | --- |
-| `start_recording` | `{ meetingId?: string, sourceApp?: string, title?: string }` | `MeetingSummary` | FR-1.4 |
-| `pause_recording` / `resume_recording` / `stop_recording` | — | `RecordingState` | FR-1.4 |
+| `start_recording` | `{ meetingId?: string, sourceApp?: string, title?: string }` (`meetingId` reserved for 1.5) | `MeetingSummary` | FR-1.4 |
+| `pause_recording` / `resume_recording` / `stop_recording` / `get_recording_state` | none | `RecordingState` | FR-1.4 |
 | `respond_to_prompt` | `{ signalId, choice: "record" \| "not_now" \| "never" }` | `void` | FR-1.3 |
 | `list_meetings` | `{ query?, tag?, sourceApp?, from?, to?, cursor?, limit? }` | `Page<MeetingSummary>` | FR-6.1 |
 | `get_meeting` | `{ id }` | `MeetingDetail` (segments, speakers, report, actions, scores) | FR-4.3 |
@@ -25,6 +25,10 @@ Names here are the contract between UI, core, sidecar and providers. Changing on
 | `list_audio_devices` | — | `AudioDevice[]` | FR-2.3 |
 | `set_app_rule` | `{ sourceApp, rule }` | `void` | FR-1.7 |
 
+`MeetingSummary { id, title, sourceApp, startedAt, endedAt: number | null, durationS: number | null, status }` (times epoch ms).
+`RecordingState { meetingId: string | null, state: "idle" | "recording" | "paused" | "stopped", elapsedMs, error: string | null }`: `idle` = nothing recorded since launch; `elapsedMs` counts recorded time only (paused time excluded); `error` explains a recording that stopped by itself.
+`AudioDevice { id, name, kind: "input" | "output", isDefault }` (`id` is the PipeWire `node.name` on Linux). Recording uses the system defaults until the FR-8.3 device setting exists.
+
 `Settings { startOnLogin: boolean }` for now; FR-8.3 fields (language, summary length, template, retention) join it later. `startOnLogin` is read from the OS login item, not stored in SQLite.
 
 ## Tauri events (core → UI)
@@ -32,14 +36,14 @@ Names here are the contract between UI, core, sidecar and providers. Changing on
 | --- | --- |
 | `meeting:detected` | `{ signalId, sourceApp, title?, confidence }` |
 | `meeting:ended` | `{ meetingId }` |
-| `recording:state` | `{ meetingId, state: "recording" \| "paused" \| "stopped", elapsedMs }` |
-| `recording:levels` | `{ micDb, sysDb }` (≤10 Hz) |
+| `recording:state` | `RecordingState` |
+| `recording:levels` | `{ micDb, sysDb }` (≤10 Hz), dBFS from -90 to 0; `null` when that device sent no audio in the last 100 ms |
 | `caption:segment` | `Segment` (live captions, FR-3.5) |
 | `job:progress` | `{ meetingId, step, status, attempt, error? }` |
 | `meeting:ready` | `{ meetingId }` |
 
 ## Errors
-`AppError { code: string, message: string, retryable: boolean }`. Codes: `no_api_key`, `provider_unavailable`, `provider_rejected`, `audio_device`, `permission_denied`, `storage`, `invalid_llm_output`, `not_found`, `sidecar_down`, `internal` (unexpected failure; generic message, detail in the log file).
+`AppError { code: string, message: string, retryable: boolean }`. Codes: `no_api_key`, `provider_unavailable`, `provider_rejected`, `audio_device`, `permission_denied`, `storage`, `invalid_llm_output`, `not_found`, `sidecar_down`, `invalid_state` (action does not fit the current state, e.g. stop while not recording), `internal` (unexpected failure; generic message, detail in the log file).
 
 ## Provider trait (Rust)
 ```rust

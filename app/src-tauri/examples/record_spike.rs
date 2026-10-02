@@ -50,7 +50,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         key: AudioKey::new(&key)?,
     };
     println!("recording {seconds} s to {}", dir.display());
-    let recorder = Recorder::start(&*default_backend(), config, target)?;
+    let recorder = Recorder::start(&*default_backend(), config, target, Box::new(|_| {}))?;
     for _ in 0..seconds * 10 {
         std::thread::sleep(Duration::from_millis(100));
         if !recorder.is_running() {

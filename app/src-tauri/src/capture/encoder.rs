@@ -91,6 +91,11 @@ impl ChunkEncoder {
         Ok(done)
     }
 
+    /// Track position of the next sample: everything before it is buffered or saved.
+    pub fn position(&self) -> u64 {
+        self.next_sample
+    }
+
     /// Encodes what is buffered as the last, short chunk. `None` when nothing is buffered.
     pub fn finish(&mut self) -> Result<Option<EncodedChunk>, CaptureError> {
         if self.pending.is_empty() && self.packets.is_empty() {
