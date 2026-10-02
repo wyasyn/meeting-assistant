@@ -7,7 +7,7 @@ import {
   onJobProgress,
   onRecordingState,
   type JobProgress,
-  type MeetingSummary,
+  type MeetingListItem,
 } from "@/lib/ipc";
 import { MeetingList } from "./MeetingList";
 
@@ -21,7 +21,7 @@ vi.mock("@/lib/ipc", async (importOriginal) => ({
 const listMock = vi.mocked(listMeetings);
 const jobMock = vi.mocked(onJobProgress);
 
-function meeting(over: Partial<MeetingSummary>): MeetingSummary {
+function meeting(over: Partial<MeetingListItem>): MeetingListItem {
   return {
     id: "m1",
     title: "Standup",
@@ -30,6 +30,8 @@ function meeting(over: Partial<MeetingSummary>): MeetingSummary {
     endedAt: Date.UTC(2026, 9, 2, 9, 15),
     durationS: 900,
     status: "ready",
+    participants: [],
+    scores: [],
     ...over,
   };
 }
@@ -40,7 +42,7 @@ beforeEach(() => {
   vi.mocked(onRecordingState).mockResolvedValue(() => undefined);
 });
 
-describe("MeetingList (FR-6.1 partial)", () => {
+describe("MeetingList (FR-6.1)", () => {
   it("opens a ready meeting and shows the others' status", async () => {
     listMock.mockResolvedValue({
       items: [
@@ -56,10 +58,62 @@ describe("MeetingList (FR-6.1 partial)", () => {
     await userEvent.click(await screen.findByRole("button", { name: /Standup/ }));
     expect(onOpen).toHaveBeenCalledWith("m1");
     expect(screen.getByRole("button", { name: /Standup/ })).toHaveTextContent("15:00");
-    expect(screen.getByText("Transcribing")).toBeInTheDocument();
-    expect(screen.getByText("Transcription failed")).toBeInTheDocument();
+    expect(screen.getByText("Processing")).toBeInTheDocument();
+    expect(screen.getByText("Processing failed")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Review/ })).toBeNull();
     expect(listMock).toHaveBeenCalledWith({ limit: 20 });
+  });
+
+  it("shows the source app, participants and scores", async () => {
+    listMock.mockResolvedValue({
+      items: [
+        meeting({
+          participants: ["Ann", "Bob"],
+          scores: [
+            { kind: "engagement", value: 71.6 },
+            { kind: "value", value: 54 },
+            { kind: "my_performance", value: 81 },
+            { kind: "productivity", value: 66 },
+          ],
+        }),
+        meeting({ id: "m2", title: "Notes", sourceApp: "other" }),
+      ],
+      nextCursor: null,
+    });
+    render(<MeetingList onOpen={vi.fn()} />);
+    const row = await screen.findByRole("button", { name: /Standup/ });
+    expect(row).toHaveTextContent("Zoom");
+    expect(row).toHaveTextContent("with Ann, Bob");
+    expect(screen.getByLabelText("Engagement 72")).toBeInTheDocument();
+    expect(screen.getByLabelText("Value of discussion 54")).toBeInTheDocument();
+    expect(screen.getByLabelText("My performance 81")).toBeInTheDocument();
+    expect(screen.getByLabelText("Productivity 66")).toBeInTheDocument();
+    const notes = screen.getByRole("button", { name: /Notes/ });
+    expect(notes).not.toHaveTextContent("other");
+    expect(notes).not.toHaveTextContent("with");
+  });
+
+  it("loads more meetings and keeps them on reload", async () => {
+    let progress: ((p: JobProgress) => void) | undefined;
+    jobMock.mockImplementation((handler) => {
+      progress = handler;
+      return Promise.resolve(() => undefined);
+    });
+    listMock.mockResolvedValueOnce({ items: [meeting({})], nextCursor: "c1" });
+    listMock.mockResolvedValueOnce({
+      items: [meeting({ id: "m2", title: "Older" })],
+      nextCursor: null,
+    });
+    render(<MeetingList onOpen={vi.fn()} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Show more" }));
+    expect(await screen.findByRole("button", { name: /Older/ })).toBeInTheDocument();
+    expect(listMock).toHaveBeenLastCalledWith({ cursor: "c1", limit: 20 });
+    expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+
+    listMock.mockResolvedValueOnce({ items: [meeting({})], nextCursor: null });
+    progress?.({ meetingId: "m1", step: "analyze", status: "done", attempt: 1 });
+    await screen.findByRole("button", { name: /Standup/ });
+    expect(listMock).toHaveBeenLastCalledWith({ limit: 40 });
   });
 
   it("reloads when a job makes progress", async () => {
@@ -74,7 +128,7 @@ describe("MeetingList (FR-6.1 partial)", () => {
     });
     listMock.mockResolvedValueOnce({ items: [meeting({})], nextCursor: null });
     render(<MeetingList onOpen={vi.fn()} />);
-    expect(await screen.findByText("Transcribing")).toBeInTheDocument();
+    expect(await screen.findByText("Processing")).toBeInTheDocument();
 
     progress?.({ meetingId: "m1", step: "merge", status: "done", attempt: 1 });
     expect(await screen.findByRole("button", { name: /Standup/ })).toBeInTheDocument();

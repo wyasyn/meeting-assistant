@@ -10,7 +10,7 @@ import { initRecording } from "@/features/recording/store";
 import { ApiKeys } from "@/features/settings/ApiKeys";
 import { AppRules } from "@/features/settings/AppRules";
 import { StartOnLoginToggle } from "@/features/settings/StartOnLoginToggle";
-import { MeetingList } from "@/features/transcript/MeetingList";
+import { MeetingList } from "@/features/library/MeetingList";
 
 function App() {
   useEffect(() => initRecording(), []);

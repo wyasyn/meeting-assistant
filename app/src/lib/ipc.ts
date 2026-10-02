@@ -385,9 +385,24 @@ export interface MeetingDetail {
   scores: Score[];
 }
 
-/** Newest first. Other filters join with the library (FR-6.1) and search (FR-6.2). */
+/** Mirrors Rust `store::reports::ScoreValue`: a headline score without its evidence. */
+export interface ScoreValue {
+  kind: ScoreKind;
+  /** 0 to 100. */
+  value: number;
+}
+
+/** Mirrors Rust `meetings::MeetingListItem`: a library row (FR-6.1). */
+export interface MeetingListItem extends MeetingSummary {
+  /** Names of the other side, in order of first appearance; "Me" is left out. */
+  participants: string[];
+  /** Headline scores in display order; empty until scored or with too little data. */
+  scores: ScoreValue[];
+}
+
+/** Newest first; `limit` 1 to 200, default 50. Other filters join with search (FR-6.2). */
 export function listMeetings(args: { cursor?: string; limit?: number } = {}) {
-  return call<Page<MeetingSummary>>("list_meetings", args);
+  return call<Page<MeetingListItem>>("list_meetings", args);
 }
 
 export function getMeeting(id: string) {

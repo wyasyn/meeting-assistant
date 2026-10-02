@@ -12,7 +12,7 @@ use crate::capture::Track;
 use crate::error::AppError;
 use crate::recording::MeetingSummary;
 use crate::store::meetings::{MeetingRepo, MeetingRow};
-use crate::store::reports::{ActionItem, Report, ReportRepo, Score};
+use crate::store::reports::{ActionItem, Report, ReportRepo, Score, ScoreValue};
 use crate::store::segments::{Segment, SegmentRepo, Speaker};
 use crate::store::Store;
 
@@ -28,6 +28,18 @@ pub struct Page<T> {
     pub items: Vec<T>,
     /// Pass back as `cursor` for the next page; `None` on the last page.
     pub next_cursor: Option<String>,
+}
+
+/// One row of the library (FR-6.1): the meeting, who was in it and its scores.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingListItem {
+    #[serde(flatten)]
+    pub meeting: MeetingSummary,
+    /// Names of the other side, in order of first appearance; "Me" is left out.
+    pub participants: Vec<String>,
+    /// Headline scores in display order; empty until scored or with too little data.
+    pub scores: Vec<ScoreValue>,
 }
 
 /// `get_meeting`.
@@ -65,18 +77,33 @@ impl MeetingService {
         &self,
         cursor: Option<&str>,
         limit: Option<u32>,
-    ) -> Result<Page<MeetingSummary>, AppError> {
+    ) -> Result<Page<MeetingListItem>, AppError> {
         let limit = limit.unwrap_or(DEFAULT_PAGE).clamp(1, MAX_PAGE);
         let before = cursor.map(parse_cursor).transpose()?;
-        let rows = MeetingRepo::new(&*self.store.conn()?)
+        let conn = self.store.conn()?;
+        let rows = MeetingRepo::new(&conn)
             .list(before.as_ref().map(|(at, id)| (*at, id.as_str())), limit)?;
         let next_cursor = (rows.len() == limit as usize)
             .then(|| rows.last().map(|r| format!("{}:{}", r.started_at, r.id)))
             .flatten();
-        Ok(Page {
-            items: rows.into_iter().map(summary).collect(),
-            next_cursor,
-        })
+        let (segments, reports) = (SegmentRepo::new(&conn), ReportRepo::new(&conn));
+        let items = rows
+            .into_iter()
+            .map(|row| {
+                let participants = segments
+                    .speakers(&row.id)?
+                    .into_iter()
+                    .filter(|s| !s.is_me)
+                    .map(|s| s.label)
+                    .collect();
+                Ok(MeetingListItem {
+                    participants,
+                    scores: reports.headline_values(&row.id)?,
+                    meeting: summary(row),
+                })
+            })
+            .collect::<Result<_, AppError>>()?;
+        Ok(Page { items, next_cursor })
     }
 
     pub fn detail(&self, id: &str) -> Result<MeetingDetail, AppError> {
@@ -221,11 +248,22 @@ mod tests {
             repo.create_recording("Later", "browser", 5_000).unwrap();
         }
         let first = h.service.list(None, Some(1)).unwrap();
-        assert_eq!(first.items[0].title, "Later");
+        assert_eq!(first.items[0].meeting.title, "Later");
+        assert!(first.items[0].participants.is_empty());
         let cursor = first.next_cursor.unwrap();
         let second = h.service.list(Some(&cursor), Some(1)).unwrap();
-        assert_eq!(second.items[0].title, "Standup");
-        assert_eq!(second.items[0].duration_s, Some(30));
+        assert_eq!(second.items[0].meeting.title, "Standup");
+        assert_eq!(second.items[0].meeting.duration_s, Some(30));
+        assert_eq!(second.items[0].participants, ["Speaker 1"]);
+        assert!(second.items[0].scores.is_empty());
+        let wire = serde_json::to_value(&second.items[0]).unwrap();
+        assert_eq!(
+            (&wire["title"], &wire["participants"][0]),
+            (
+                &serde_json::json!("Standup"),
+                &serde_json::json!("Speaker 1")
+            )
+        );
         let last = h.service.list(Some(&cursor), None).unwrap();
         assert_eq!((last.items.len(), last.next_cursor), (1, None));
         let bad = h.service.list(Some("nonsense"), None).unwrap_err();

@@ -111,6 +111,13 @@ pub struct Score {
     pub evidence: Evidence,
 }
 
+/// A headline score without its evidence.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ScoreValue {
+    pub kind: String,
+    pub value: f64,
+}
+
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
 pub struct Evidence {
@@ -211,6 +218,32 @@ impl<'a> ReportRepo<'a> {
             out.extend(score);
         }
         Ok(out)
+    }
+
+    /// Headline score values only, in `HEADLINE_KINDS` order, for the library (FR-6.1).
+    pub fn headline_values(&self, meeting_id: &str) -> Result<Vec<ScoreValue>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT kind, value FROM scores WHERE meeting_id = ?1 AND kind IN (?2, ?3, ?4, ?5)",
+        )?;
+        let mut values: Vec<ScoreValue> = stmt
+            .query_map(
+                params![
+                    meeting_id,
+                    HEADLINE_KINDS[0],
+                    HEADLINE_KINDS[1],
+                    HEADLINE_KINDS[2],
+                    HEADLINE_KINDS[3]
+                ],
+                |row| {
+                    Ok(ScoreValue {
+                        kind: row.get(0)?,
+                        value: row.get(1)?,
+                    })
+                },
+            )?
+            .collect::<Result<_, _>>()?;
+        values.sort_by_key(|v| HEADLINE_KINDS.iter().position(|k| *k == v.kind));
+        Ok(values)
     }
 
     /// Replaces the computed `metric:*` rows, leaving the analysis ones alone.
@@ -508,5 +541,19 @@ mod tests {
         assert_eq!(scores[1].evidence, Evidence::default());
         let wire = serde_json::to_value(&scores[0]).unwrap();
         assert_eq!(wire["evidence"]["segmentIds"], json!(["seg-1"]));
+        let values = repo.headline_values(&id).unwrap();
+        assert_eq!(
+            values,
+            [
+                ScoreValue {
+                    kind: "engagement".into(),
+                    value: 62.0
+                },
+                ScoreValue {
+                    kind: "productivity".into(),
+                    value: 40.0
+                },
+            ]
+        );
     }
 }

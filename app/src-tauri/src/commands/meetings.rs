@@ -5,8 +5,7 @@ use tauri::ipc::Response;
 use tauri::State;
 
 use crate::error::AppError;
-use crate::meetings::{MeetingDetail, MeetingService, Page};
-use crate::recording::MeetingSummary;
+use crate::meetings::{MeetingDetail, MeetingListItem, MeetingService, Page};
 use crate::store::segments::Speaker;
 
 /// Runs database and decoding work off the main thread.
@@ -26,7 +25,7 @@ pub async fn list_meetings(
     service: State<'_, MeetingService>,
     cursor: Option<String>,
     limit: Option<u32>,
-) -> Result<Page<MeetingSummary>, AppError> {
+) -> Result<Page<MeetingListItem>, AppError> {
     blocking(&service, move |s| s.list(cursor.as_deref(), limit)).await
 }
 

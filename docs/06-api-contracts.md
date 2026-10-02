@@ -8,7 +8,7 @@ Names here are the contract between UI, core, sidecar and providers. Changing on
 | `start_recording` | `{ meetingId?: string, sourceApp?: string, title?: string }` (`meetingId` reserved for 1.5) | `MeetingSummary` | FR-1.4 |
 | `pause_recording` / `resume_recording` / `stop_recording` / `get_recording_state` | none | `RecordingState` | FR-1.4 |
 | `respond_to_prompt` | `{ signalId, choice: "record" \| "not_now" \| "never" }` | `void` | FR-1.3 |
-| `list_meetings` | `{ query?, tag?, sourceApp?, from?, to?, cursor?, limit? }` (only `cursor` and `limit` so far; `limit` 1 to 200, default 50) | `Page<MeetingSummary>`, newest first | FR-6.1 |
+| `list_meetings` | `{ query?, tag?, sourceApp?, from?, to?, cursor?, limit? }` (only `cursor` and `limit` so far; `limit` 1 to 200, default 50) | `Page<MeetingListItem>`, newest first | FR-6.1 |
 | `get_meeting` | `{ id }` | `MeetingDetail` (segments, speakers, report, actions, scores) | FR-4.3 |
 | `search` | `{ text, limit? }` | `SearchHit[]` | FR-6.2 |
 | `ask` | `{ question, meetingIds? }` | `{ answer, citations: SegmentRef[] }` | FR-6.4 |
@@ -29,6 +29,7 @@ Names here are the contract between UI, core, sidecar and providers. Changing on
 | `list_app_rules` | none | `AppRuleEntry[]` | FR-1.7 |
 
 `MeetingSummary { id, title, sourceApp, startedAt, endedAt: number | null, durationS: number | null, status }` (times epoch ms).
+`MeetingListItem`: the `MeetingSummary` fields plus `participants: string[]` (labels of the other side in order of first appearance, "Me" left out) and `scores: { kind, value }[]` (headline scores in display order, empty until scored or with too little data).
 `Page<T> { items: T[], nextCursor: string | null }`: pass `nextCursor` back as `cursor`; `null` on the last page.
 `MeetingDetail { meeting: MeetingSummary, speakers: Speaker[], segments: Segment[], hasAudio, report: Report | null, actionItems: ActionItem[], scores: Score[] }`: speakers "Me" first; segments of both tracks in time order; `hasAudio` false once retention deleted the audio; `report` null until analyzed or when nobody was heard; `scores` holds the headline scores only, in the order engagement, value, my_performance, productivity, and is empty when there was too little data to score (ADR-025).
 `Report { summary, keyPoints: string[], decisions: { text, segmentId }[], openQuestions: string[], suggestions: { text, scoreKind, segmentId }[], chapters: { title, startMs }[], modelUsed, costUsd: number | null, createdAt }`. `ActionItem { id, task, ownerLabel: string | null, dueDate: string | null, done, segmentId: string | null }` (`ownerLabel` "Me" is the user; `dueDate` YYYY-MM-DD). `Score { kind, value, evidence: { metrics: Record<string, number>, parts: { name, weight, score }[], segmentIds: string[], rationale } }`. Every `segmentId` is a segment of the meeting.
