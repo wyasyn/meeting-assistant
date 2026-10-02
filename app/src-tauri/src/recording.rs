@@ -10,6 +10,7 @@ use serde::Serialize;
 
 use crate::capture::recorder::{Levels, Recorder, RecordingTarget};
 use crate::capture::{AudioBackend, CaptureConfig, CaptureError};
+use crate::detector::apps::SourceApp;
 use crate::error::AppError;
 use crate::store::meetings::{MeetingRepo, MeetingStatus, OpenRecording};
 use crate::store::{now_ms, Store};
@@ -152,10 +153,11 @@ impl RecordingService {
                 "A recording is already running.".into(),
             ));
         }
-        let title = title
-            .filter(|t| !t.trim().is_empty())
-            .unwrap_or_else(|| DEFAULT_TITLE.into());
         let source_app = source_app.unwrap_or_else(|| DEFAULT_SOURCE_APP.into());
+        let title = title.filter(|t| !t.trim().is_empty()).unwrap_or_else(|| {
+            SourceApp::parse(&source_app)
+                .map_or_else(|| DEFAULT_TITLE.into(), SourceApp::meeting_title)
+        });
         let started_at = now_ms();
         let meeting = MeetingRepo::new(&*self.0.store.conn()?).create_recording(
             &title,
@@ -468,6 +470,20 @@ mod tests {
             .join("mic")
             .join("000001.opus.enc")
             .exists());
+    }
+
+    #[test]
+    fn fr_1_3_untitled_recording_of_a_detected_app_is_named_after_it() {
+        let dir = TempDir::new("service-title");
+        let (service, _) = service(live(), &dir);
+        let titled = |source_app: Option<&str>| {
+            let meeting = service.start(None, source_app.map(Into::into)).unwrap();
+            service.stop().unwrap();
+            meeting.title
+        };
+        assert_eq!(titled(Some("zoom")), "Zoom meeting");
+        assert_eq!(titled(Some("other")), "Recording");
+        assert_eq!(titled(None), "Recording");
     }
 
     #[test]

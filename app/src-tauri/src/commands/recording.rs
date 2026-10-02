@@ -1,10 +1,11 @@
 //! Recording commands (FR-1.4, FR-2.3). Thin: the work is in `crate::recording`.
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Runtime, State};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 use crate::capture::recorder::Levels;
 use crate::capture::{default_backend, AudioDevice};
+use crate::consent::ConsentService;
 use crate::error::AppError;
 use crate::recording::{MeetingSummary, RecordingEvents, RecordingService, RecordingState};
 use crate::tray;
@@ -12,7 +13,7 @@ use crate::tray;
 pub const STATE_EVENT: &str = "recording:state";
 pub const LEVELS_EVENT: &str = "recording:levels";
 
-/// Sends state changes to the window and the tray, and levels to the window.
+/// Sends state changes to the window, the tray and consent, and levels to the window.
 pub struct TauriEvents<R: Runtime>(pub AppHandle<R>);
 
 impl<R: Runtime> TauriEvents<R> {
@@ -26,6 +27,9 @@ impl<R: Runtime> TauriEvents<R> {
 impl<R: Runtime> RecordingEvents for TauriEvents<R> {
     fn state(&self, state: &RecordingState) {
         tray::show_recording_state(&self.0, state.state);
+        if let Some(consent) = self.0.try_state::<ConsentService>() {
+            consent.recording_changed(state.state);
+        }
         self.emit(STATE_EVENT, state.clone());
     }
 

@@ -1,6 +1,7 @@
 //! SQLite repo layer, migrations and encryption.
 //! One SQLCipher file at `<app_data>/db/app.sqlite`, keyed from the OS keychain (NFR-13).
 
+pub mod app_rules;
 pub mod crypto;
 pub mod key;
 pub mod meetings;

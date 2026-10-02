@@ -1,9 +1,9 @@
 //! Meeting apps the detector knows, matched by process or binary name (FR-1.1, FR-1.2).
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// The app a signal came from. Serialised as the `meetings.source_app` value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SourceApp {
     Zoom,
@@ -31,6 +31,27 @@ impl SourceApp {
             Self::Discord => "discord",
             Self::Browser => "browser",
         }
+    }
+
+    /// The `source_app` value back to the app; `None` for values detection never makes.
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|app| app.as_str() == value)
+    }
+
+    /// Name shown in prompts and titles.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Zoom => "Zoom",
+            Self::Slack => "Slack",
+            Self::Teams => "Teams",
+            Self::Discord => "Discord",
+            Self::Browser => "Browser",
+        }
+    }
+
+    /// Title of a meeting recorded from a detection, until the calendar names it (FR-1.8).
+    pub fn meeting_title(self) -> String {
+        format!("{} meeting", self.label())
     }
 }
 
@@ -110,10 +131,12 @@ mod tests {
     #[test]
     fn serialises_as_the_source_app_value() {
         for app in SourceApp::ALL {
-            assert_eq!(
-                serde_json::to_value(app).unwrap(),
-                serde_json::Value::String(app.as_str().into())
-            );
+            let json = serde_json::to_value(app).unwrap();
+            assert_eq!(json, serde_json::Value::String(app.as_str().into()));
+            assert_eq!(serde_json::from_value::<SourceApp>(json).unwrap(), app);
+            assert_eq!(SourceApp::parse(app.as_str()), Some(app));
         }
+        assert_eq!(SourceApp::parse("other"), None);
+        assert_eq!(SourceApp::Zoom.meeting_title(), "Zoom meeting");
     }
 }

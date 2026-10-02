@@ -23,18 +23,21 @@ Names here are the contract between UI, core, sidecar and providers. Changing on
 | `set_api_key` / `clear_api_key` | `{ provider, key? }` | `void` (stored in keychain) | FR-8.1 |
 | `test_provider` | `{ provider }` | `{ ok, message }` | FR-8.1 |
 | `list_audio_devices` | — | `AudioDevice[]` | FR-2.3 |
-| `set_app_rule` | `{ sourceApp, rule }` | `void` | FR-1.7 |
+| `set_app_rule` | `{ sourceApp, rule: "ask" \| "always" \| "never" }` | `void` (`never` also closes that app's open prompt) | FR-1.7 |
+| `list_app_rules` | none | `AppRuleEntry[]` | FR-1.7 |
 
 `MeetingSummary { id, title, sourceApp, startedAt, endedAt: number | null, durationS: number | null, status }` (times epoch ms).
 `RecordingState { meetingId: string | null, state: "idle" | "recording" | "paused" | "stopped", elapsedMs, error: string | null }`: `idle` = nothing recorded since launch; `elapsedMs` counts recorded time only (paused time excluded); `error` explains a recording that stopped by itself.
 `AudioDevice { id, name, kind: "input" | "output", isDefault }` (`id` is the PipeWire `node.name` on Linux). Recording uses the system defaults until the FR-8.3 device setting exists.
+`AppRuleEntry { sourceApp, rule }`: one per known app (`zoom`, `slack`, `teams`, `discord`, `browser`), `ask` when none is set. Starting a recording from a prompt is `start_recording { sourceApp }` with no title; the core names it "<App> meeting".
 
 `Settings { startOnLogin: boolean }` for now; FR-8.3 fields (language, summary length, template, retention) join it later. `startOnLogin` is read from the OS login item, not stored in SQLite.
 
 ## Tauri events (core → UI)
 | Event | Payload |
 | --- | --- |
-| `meeting:detected` | `{ signalId, sourceApp: "zoom" \| "slack" \| "teams" \| "discord" \| "browser", title: string \| null, confidence }` (0 to 1; `title` null until extension/calendar; never while recording) |
+| `meeting:detected` | `{ signalId, sourceApp: "zoom" \| "slack" \| "teams" \| "discord" \| "browser", title: string \| null, confidence }` (0 to 1; `title` null until extension/calendar; never while recording). Sent only when the app's rule is `ask`: it is the consent prompt (FR-1.3); `never` drops the detection and `always` starts recording instead |
+| `meeting:prompt-closed` | `{ signalId }`: the prompt was answered on the notification, a recording started, or `never` was set for the app; the window removes it |
 | `meeting:ended` | `{ meetingId }` |
 | `recording:state` | `RecordingState` |
 | `recording:levels` | `{ micDb, sysDb }` (≤10 Hz), dBFS from -90 to 0; `null` when that device sent no audio in the last 100 ms |

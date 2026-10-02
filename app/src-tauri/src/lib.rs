@@ -1,5 +1,6 @@
 pub mod capture;
 mod commands;
+mod consent;
 mod detector;
 pub mod error;
 mod jobs;
@@ -44,20 +45,32 @@ pub fn run() {
             }
             let db = Arc::new(db);
             app.manage(Arc::clone(&db));
-            app.manage(recording::RecordingService::new(
+            let recording = recording::RecordingService::new(
                 capture::default_backend(),
-                db,
+                Arc::clone(&db),
                 data_dir.clone(),
                 Arc::new(commands::recording::TauriEvents(app.handle().clone())),
-            ));
+            );
+            app.manage(recording.clone());
+            // Detections reach the user only through consent (FR-1.3, FR-1.7).
+            let consent = consent::ConsentService::new(
+                db,
+                Arc::new(recording),
+                consent::default_notifier(
+                    app.config()
+                        .product_name
+                        .clone()
+                        .unwrap_or_else(|| app.config().identifier.clone()),
+                ),
+                Arc::new(commands::consent::TauriConsentEvents(app.handle().clone())),
+            );
+            app.manage(consent.clone());
 
             let handle = app.handle().clone();
             app.manage(detector::DetectorService::start(
                 detector::default_processes(),
                 detector::default_streams(),
-                Arc::new(commands::detector::TauriDetectorEvents(
-                    app.handle().clone(),
-                )),
+                Arc::new(consent),
                 // No meeting:detected while a recording runs or is paused.
                 Box::new(move || {
                     handle
@@ -98,6 +111,8 @@ pub fn run() {
             commands::recording::stop_recording,
             commands::recording::get_recording_state,
             commands::recording::list_audio_devices,
+            commands::consent::list_app_rules,
+            commands::consent::set_app_rule,
         ])
         .build(tauri::generate_context!());
 

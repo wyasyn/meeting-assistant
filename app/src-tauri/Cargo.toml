@@ -50,4 +50,5 @@ unwrap_used = "deny"
 expect_used = "deny"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+notify-rust = "4.18"
 pipewire = "0.10"

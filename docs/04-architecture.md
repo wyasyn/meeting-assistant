@@ -19,6 +19,7 @@ flowchart LR
 | Module | Responsibility | Key types |
 | --- | --- | --- |
 | `detector` | Watch processes, PipeWire mic/output streams, extension messages, calendar; emit `MeetingDetected` / `MeetingEnded` | `DetectorSource` trait, `MeetingSignal` |
+| `consent` | Apply the per-app rule to each detection; prompt as a notification (Record / Not now / Never) and in the window; start recording on Record or an `always` rule | `ConsentService`, `Notifier` trait, `RecordingControl` |
 | `capture` | Record mic + system tracks, encode Opus, write 10 s chunks, live level meters | `AudioBackend` trait (`PipeWireBackend`, `WasapiBackend`, `MacBackend`) |
 | `jobs` | Persistent queue; runs pipeline steps; retries with backoff | `Job`, `Step` enum, `Pipeline` |
 | `metrics` | Deterministic metrics from segments | `MeetingMetrics` |

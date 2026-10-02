@@ -169,8 +169,36 @@ export interface MeetingDetected {
   confidence: number;
 }
 
+/** `meeting:detected` fires only for apps whose rule is `ask`: it is the consent prompt. */
 export function onMeetingDetected(handler: (signal: MeetingDetected) => void) {
   return on<MeetingDetected>("meeting:detected", handler);
+}
+
+/** `meeting:prompt-closed` payload: the prompt was answered elsewhere or is no longer needed. */
+export interface MeetingPromptClosed {
+  signalId: string;
+}
+
+export function onMeetingPromptClosed(handler: (closed: MeetingPromptClosed) => void) {
+  return on<MeetingPromptClosed>("meeting:prompt-closed", handler);
+}
+
+/** Mirrors Rust `store::app_rules::AppRule` (FR-1.7). */
+export type AppRule = "ask" | "always" | "never";
+
+/** Mirrors Rust `consent::AppRuleEntry`. */
+export interface AppRuleEntry {
+  sourceApp: DetectedApp;
+  rule: AppRule;
+}
+
+/** Every known app with its rule; `ask` when none is set. */
+export function listAppRules() {
+  return call<AppRuleEntry[]>("list_app_rules");
+}
+
+export function setAppRule(sourceApp: DetectedApp, rule: AppRule) {
+  return call<undefined>("set_app_rule", { sourceApp, rule });
 }
 
 /** Listens to an event and passes only its payload. Resolves to the unlisten function. */

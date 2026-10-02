@@ -2,7 +2,13 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import App from "@/App";
 import { APP_NAME } from "@/config";
-import { getRecordingState, onRecordingLevels, onRecordingState } from "@/lib/ipc";
+import {
+  getRecordingState,
+  onMeetingDetected,
+  onMeetingPromptClosed,
+  onRecordingLevels,
+  onRecordingState,
+} from "@/lib/ipc";
 
 vi.mock("@/lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/ipc")>()),
@@ -13,6 +19,9 @@ vi.mock("@/lib/ipc", async (importOriginal) => ({
   listAudioDevices: vi.fn(() => Promise.resolve([])),
   onRecordingState: vi.fn(() => Promise.resolve(() => undefined)),
   onRecordingLevels: vi.fn(() => Promise.resolve(() => undefined)),
+  onMeetingDetected: vi.fn(() => Promise.resolve(() => undefined)),
+  onMeetingPromptClosed: vi.fn(() => Promise.resolve(() => undefined)),
+  listAppRules: vi.fn(() => Promise.resolve([])),
 }));
 
 describe("App", () => {
@@ -28,5 +37,12 @@ describe("App", () => {
     expect(getRecordingState).toHaveBeenCalled();
     expect(onRecordingState).toHaveBeenCalled();
     expect(onRecordingLevels).toHaveBeenCalled();
+  });
+
+  // FR-1.3: detections reach the window as consent prompts.
+  it("follows consent prompts", () => {
+    render(<App />);
+    expect(onMeetingDetected).toHaveBeenCalled();
+    expect(onMeetingPromptClosed).toHaveBeenCalled();
   });
 });
