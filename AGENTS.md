@@ -62,8 +62,10 @@ Daily:
 ```bash
 cd app && npm install && npm run tauri dev          # run the app
 cd app && npm run lint && npm run typecheck && npm test
+cd app && npm run format                             # prettier --write
+cd app && npm run test:coverage                      # vitest with v8 coverage
 cd app/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test
-cd sidecar && uv sync && uv run ruff check . && uv run pytest
+cd sidecar && uv sync && uv run ruff check . && uv run ruff format --check . && uv run pytest
 cd sidecar && uv run uvicorn app.main:app --port 0   # sidecar alone (core normally spawns it)
 ```
 Keep these commands working. If you add a script, add it here.

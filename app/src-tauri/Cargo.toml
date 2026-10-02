@@ -29,3 +29,8 @@ lto = true
 opt-level = 3
 panic = "abort"
 strip = true
+
+[lints.clippy]
+# AGENTS.md: no unwrap()/expect() outside tests (see clippy.toml).
+unwrap_used = "deny"
+expect_used = "deny"

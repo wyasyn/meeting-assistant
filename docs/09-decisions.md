@@ -26,6 +26,9 @@ The stack named React 18, but current shadcn/ui targets React 19 and Tailwind v4
 ## ADR-008 (2026-10-02): Placeholder name and bundle identifier
 The product name is still open. Decision: `productName` "Meeting Assistant", identifier `dev.meetingassistant.app`, Rust crate `meeting-assistant` (lib `meeting_assistant_lib`). UI reads `APP_NAME` from `app/src/config.ts`. Change all four together once a name is chosen; the identifier must be final before the first public release because it sets data and keychain paths.
 
+## ADR-009 (2026-10-02): Lint and test tooling
+Frontend: ESLint 10 flat config with typescript-eslint `strictTypeChecked` + `stylisticTypeChecked`, react-hooks and react-refresh; `no-explicit-any` is an error. Prettier (with `prettier-plugin-tailwindcss` for class order) runs inside `npm run lint`. Vitest + jsdom + Testing Library, coverage via `@vitest/coverage-v8` (NFR-23). Rust: clippy denies `unwrap_used` and `expect_used` through `[lints.clippy]` in Cargo.toml, with `clippy.toml` allowing them in tests, so the AGENTS.md rule is enforced rather than reviewed. Python: ruff rule sets E, W, F, I, B, UP, SIM, and `ruff format --check` is part of the lint command.
+
 ## Open questions (owner to decide)
 - [ ] Product name and bundle identifier.
 - [ ] Default cloud STT: Gemini alone, or Deepgram/AssemblyAI for better diarization?
