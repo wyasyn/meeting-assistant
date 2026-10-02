@@ -554,7 +554,9 @@ mod tests {
                     step(
                         log,
                         "mic",
-                        vec![AppError::NoApiKey("Add an API key in settings.".into())],
+                        vec![AppError::ProviderRejected(
+                            "Gemini refused the request.".into(),
+                        )],
                     ),
                 )
                 .with(Step::Merge, step(log, "merge", vec![]))
@@ -563,7 +565,7 @@ mod tests {
         assert_eq!(h.status(), "failed");
         assert_eq!(*h.log.lock().unwrap(), ["mic"]);
         let last = h.events.0.lock().unwrap().last().cloned().unwrap();
-        assert_eq!(last.error.as_deref(), Some("Add an API key in settings."));
+        assert_eq!(last.error.as_deref(), Some("Gemini refused the request."));
     }
 
     #[test]
