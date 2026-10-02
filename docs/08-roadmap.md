@@ -2,7 +2,7 @@
 
 Agents: pick the first unchecked task in the current phase, do only that, tick it when "Definition of done" in AGENTS.md is met.
 
-**Current phase: 0**
+**Current phase: 1**
 
 ## Phase 0 — Foundations
 - [x] 0.1 Scaffold repo per AGENTS.md layout: Tauri 2 + React + TS (strict) + Vite + Tailwind + shadcn/ui in `app/`; `sidecar/` with uv + FastAPI `/health`; root `.gitignore`, `.editorconfig`, README.
@@ -13,7 +13,7 @@ Agents: pick the first unchecked task in the current phase, do only that, tick i
 - [x] 0.6 Tray icon with menu (Open, Start recording, Quit) and start-on-login setting (FR-8.5).
 
 ## Phase 1 — Record and transcribe (MVP core)
-- [ ] 1.1 `AudioBackend` trait + `PipeWireBackend`: list devices, capture mic and default output monitor as two tracks (FR-2.1, FR-2.3). Spike first; record findings in `09-decisions.md`.
+- [x] 1.1 `AudioBackend` trait + `PipeWireBackend`: list devices, capture mic and default output monitor as two tracks (FR-2.1, FR-2.3). Spike first; record findings in `09-decisions.md`.
 - [ ] 1.2 Opus encoding into encrypted 10 s chunks; crash-recovery scan on startup marks interrupted meetings and keeps their audio (FR-2.4, NFR-6).
 - [ ] 1.3 Manual recording UI: start/pause/stop, timer, level meters, red indicator in window and tray (FR-1.4, FR-1.5).
 - [ ] 1.4 Detector v1: process watch + PipeWire stream watch for Zoom, Slack, Teams, Discord and browsers; debounced `meeting:detected` (FR-1.1, FR-1.2 partial).

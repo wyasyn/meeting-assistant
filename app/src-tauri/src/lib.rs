@@ -1,4 +1,4 @@
-mod capture;
+pub mod capture;
 mod commands;
 mod detector;
 pub mod error;

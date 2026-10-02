@@ -67,6 +67,7 @@ cd app && npm run test:coverage                      # vitest with v8 coverage
 cd app/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test
 cd sidecar && uv sync && uv run ruff check . && uv run ruff format --check . && uv run pytest
 cd sidecar && uv run uvicorn app.main:app --port 0   # sidecar alone (core normally spawns it)
+cd app/src-tauri && cargo run --example capture_spike -- 10 /tmp/spike   # dev only: record both tracks to raw f32 (Linux)
 ```
 Keep these commands working. If you add a script, add it here.
 

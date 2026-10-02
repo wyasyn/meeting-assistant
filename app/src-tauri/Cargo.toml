@@ -43,3 +43,6 @@ strip = true
 # AGENTS.md: no unwrap()/expect() outside tests (see clippy.toml).
 unwrap_used = "deny"
 expect_used = "deny"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+pipewire = "0.10"

@@ -38,6 +38,17 @@ Frontend: ESLint 10 flat config with typescript-eslint `strictTypeChecked` + `st
 ## ADR-012 (2026-10-02): Tray-resident app and start on login
 Closing the main window hides it; the app keeps running in the tray so detection can work in the background, and Quit in the tray menu exits. The window starts hidden and is shown in setup unless the process got `--minimized`, which only the login item passes (FR-8.5). Start on login uses `tauri-plugin-autostart`, and the OS login item is the source of truth (no copy in `settings`), so it cannot drift if the user removes it outside the app. `tauri-plugin-single-instance` makes a second launch show the running window instead of opening the encrypted database twice. "Start recording" is in the tray menu but disabled until recording exists (roadmap 1.3). On GNOME the tray needs the AppIndicator extension (Fedora: `gnome-shell-extension-appindicator`); without it a second launch still brings the window back.
 
+## ADR-013 (2026-10-02): PipeWire capture design and spike findings
+Design: `AudioBackend` trait in `capture/` with a Linux `PipeWireBackend` (`pipewire` 0.10, Linux-only dependency; other OSes return "unsupported" until their backends land). Each capture owns one thread with its own main loop and two streams: mic (`media.role=Communication`) and system (`stream.capture.sink=true`, the output's monitor). Callbacks run on that thread, not the realtime thread, and push 48 kHz mono f32 frames into a bounded queue, dropping (with a warning) rather than blocking. Frames carry a per-track sample offset from session start.
+Spike on Fedora 44, PipeWire 1.6.9, WirePlumber 0.5.18 (`examples/capture_spike.rs`):
+- Requesting F32LE/48 kHz/mono works; the adapter resamples and downmixes, also for Bluetooth HFP.
+- An idle output still delivers zeros on its monitor, so silence is not a gap.
+- Streams without `target.object` follow a change of default output mid-capture (brief pause, then resumes).
+- Built-in devices: both tracks complete, equal length.
+- Bluetooth headset already in the headset (HFP) profile: both tracks complete.
+- Bluetooth headset in A2DP when capture starts: opening the mic makes WirePlumber switch to HFP and both streams stall for seconds while still linked and "running". `pw-record` shows the same, so it is system behaviour, not ours.
+Consequences: the track clock jumps offsets forward to wall-clock time on gaps over 100 ms, so tracks stay aligned and later steps can fill silence; a watchdog reconnects a stream with no data for 2 s (it recovered the mic in 3 of 4 runs; the system track can stay silent until the headset settles). In real calls the meeting app usually holds the mic first, so HFP is already active. The recording UI (1.3) must show live levels so a stall is visible. Not tested: a Bluetooth device disconnecting mid-capture.
+
 ## Open questions (owner to decide)
 - [ ] Product name and bundle identifier.
 - [ ] Default cloud STT: Gemini alone, or Deepgram/AssemblyAI for better diarization?
