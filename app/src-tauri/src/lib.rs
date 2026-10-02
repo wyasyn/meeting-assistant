@@ -51,6 +51,27 @@ pub fn run() {
                 Arc::new(commands::recording::TauriEvents(app.handle().clone())),
             ));
 
+            let handle = app.handle().clone();
+            app.manage(detector::DetectorService::start(
+                detector::default_processes(),
+                detector::default_streams(),
+                Arc::new(commands::detector::TauriDetectorEvents(
+                    app.handle().clone(),
+                )),
+                // No meeting:detected while a recording runs or is paused.
+                Box::new(move || {
+                    handle
+                        .try_state::<recording::RecordingService>()
+                        .and_then(|service| service.state().ok())
+                        .is_some_and(|s| {
+                            matches!(
+                                s.state,
+                                recording::Phase::Recording | recording::Phase::Paused
+                            )
+                        })
+                }),
+            ));
+
             tray::init(app.handle())?;
             if !std::env::args().any(|arg| arg == MINIMIZED_ARG) {
                 tray::show_main_window(app.handle());
@@ -84,6 +105,9 @@ pub fn run() {
         Ok(app) => app.run(|handle, event| {
             if let tauri::RunEvent::Exit = event {
                 tracing::info!("app exiting");
+                if let Some(detector) = handle.try_state::<detector::DetectorService>() {
+                    detector.shutdown();
+                }
                 // Save a running recording before the process ends (rule 3).
                 if let Some(service) = handle.try_state::<recording::RecordingService>() {
                     service.shutdown();

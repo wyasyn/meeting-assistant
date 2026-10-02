@@ -33,6 +33,7 @@ opus = "0.4"
 ogg = "0.9"
 aes-gcm = "0.11"
 uuid = { version = "1.26", features = ["v7"] }
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

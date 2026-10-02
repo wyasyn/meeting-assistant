@@ -156,6 +156,23 @@ export function onRecordingLevels(handler: (levels: RecordingLevels) => void) {
   return on<RecordingLevels>("recording:levels", handler);
 }
 
+/** Mirrors Rust `detector::apps::SourceApp`. */
+export type DetectedApp = "zoom" | "slack" | "teams" | "discord" | "browser";
+
+/** Mirrors Rust `detector::MeetingDetected`; the `meeting:detected` payload. */
+export interface MeetingDetected {
+  signalId: string;
+  sourceApp: DetectedApp;
+  /** Unknown until the extension or the calendar supply it. */
+  title: string | null;
+  /** 0 to 1. */
+  confidence: number;
+}
+
+export function onMeetingDetected(handler: (signal: MeetingDetected) => void) {
+  return on<MeetingDetected>("meeting:detected", handler);
+}
+
 /** Listens to an event and passes only its payload. Resolves to the unlisten function. */
 // The per-event helpers pick T, so the single use is intended.
 // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters

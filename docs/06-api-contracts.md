@@ -34,7 +34,7 @@ Names here are the contract between UI, core, sidecar and providers. Changing on
 ## Tauri events (core → UI)
 | Event | Payload |
 | --- | --- |
-| `meeting:detected` | `{ signalId, sourceApp, title?, confidence }` |
+| `meeting:detected` | `{ signalId, sourceApp: "zoom" \| "slack" \| "teams" \| "discord" \| "browser", title: string \| null, confidence }` (0 to 1; `title` null until extension/calendar; never while recording) |
 | `meeting:ended` | `{ meetingId }` |
 | `recording:state` | `RecordingState` |
 | `recording:levels` | `{ micDb, sysDb }` (≤10 Hz), dBFS from -90 to 0; `null` when that device sent no audio in the last 100 ms |

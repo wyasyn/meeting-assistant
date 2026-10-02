@@ -54,6 +54,8 @@ flowchart LR
 4. Calendar (S): event with a conferencing link starting within ±5 min raises confidence and supplies title/attendees.
 A prompt fires when (1 or 3) AND (2) are true, or on (3) alone. Debounce: one prompt per meeting.
 
+v1 rules (ADR-016, `detector/engine.rs`): the app owning a capture stream comes from the bound node's `application.process.binary`, else its pid via the process list. A desktop app holding the mic 3 s is a meeting (confidence 0.9 when its process is seen, 0.7 when only the stream names it); a browser needs 10 s (0.5). Each app signals once and re-arms after 60 s without the mic. Nothing is signalled while recording or paused. Our own streams are ignored.
+
 ## Security model
 - DB key: random 256-bit key stored in the OS keychain; SQLCipher opens with it. Audio chunks encrypted with the same key (AES-GCM via `aes-gcm`).
 - Sidecar: random port + one-time bearer token passed at spawn; binds to 127.0.0.1 only; receives file paths, not raw audio.

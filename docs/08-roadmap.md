@@ -16,7 +16,7 @@ Agents: pick the first unchecked task in the current phase, do only that, tick i
 - [x] 1.1 `AudioBackend` trait + `PipeWireBackend`: list devices, capture mic and default output monitor as two tracks (FR-2.1, FR-2.3). Spike first; record findings in `09-decisions.md`.
 - [x] 1.2 Opus encoding into encrypted 10 s chunks; crash-recovery scan on startup marks interrupted meetings and keeps their audio (FR-2.4, NFR-6).
 - [x] 1.3 Manual recording UI: start/pause/stop, timer, level meters, red indicator in window and tray (FR-1.4, FR-1.5).
-- [ ] 1.4 Detector v1: process watch + PipeWire stream watch for Zoom, Slack, Teams, Discord and browsers; debounced `meeting:detected` (FR-1.1, FR-1.2 partial).
+- [x] 1.4 Detector v1: process watch + PipeWire stream watch for Zoom, Slack, Teams, Discord and browsers; debounced `meeting:detected` (FR-1.1, FR-1.2 partial).
 - [ ] 1.5 Consent prompt notification with Record / Not now / Never; app rules table (FR-1.3, FR-1.7).
 - [ ] 1.6 End detection: app closed / mic released / 2 min silence → prompt to stop (FR-1.6).
 - [ ] 1.7 Job queue with retries/backoff and `job:progress` events (NFR-7).

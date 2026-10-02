@@ -19,7 +19,7 @@ CREATE TABLE people (
 CREATE TABLE meetings (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
-  source_app TEXT NOT NULL,             -- zoom | meet | slack | teams | discord | in_person | import | other
+  source_app TEXT NOT NULL,             -- zoom | meet | slack | teams | discord | browser | in_person | import | other
   template TEXT NOT NULL DEFAULT 'general',
   started_at INTEGER NOT NULL,
   ended_at INTEGER,
