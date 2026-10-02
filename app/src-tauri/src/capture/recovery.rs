@@ -155,11 +155,11 @@ mod tests {
             .unwrap()
             .id;
         assert_eq!(recover(&store, &data.0).unwrap(), 1);
-        let conn = store.conn().unwrap();
-        assert_eq!(
-            MeetingRepo::new(&conn).status(&id).unwrap().as_deref(),
-            Some("interrupted")
-        );
+        let status = MeetingRepo::new(&store.conn().unwrap())
+            .status(&id)
+            .unwrap();
+        assert_eq!(status.as_deref(), Some("interrupted"));
+        // The connection guard above is gone, so `recover` can lock the store again.
         assert_eq!(recover(&store, &data.0).unwrap(), 0);
     }
 }
