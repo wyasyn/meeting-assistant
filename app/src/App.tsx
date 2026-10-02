@@ -19,11 +19,14 @@ function App() {
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background px-4 py-12 text-foreground">
-      <RecordingIndicator />
-      <h1 className="text-2xl font-semibold">{APP_NAME}</h1>
-      <ConsentPrompts />
-      <EndPrompt />
-      <RecordingControls />
+      {/* Printing a report (PDF export) shows the meeting only. */}
+      <div className="contents print:hidden">
+        <RecordingIndicator />
+        <h1 className="text-2xl font-semibold">{APP_NAME}</h1>
+        <ConsentPrompts />
+        <EndPrompt />
+        <RecordingControls />
+      </div>
       {openMeeting ? (
         <MeetingView
           meetingId={openMeeting}

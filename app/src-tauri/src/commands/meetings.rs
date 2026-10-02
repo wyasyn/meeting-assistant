@@ -1,11 +1,11 @@
-//! `list_meetings`, `get_meeting`, `rename_speaker`, `get_segment_audio` (FR-3.3, FR-3.8,
-//! FR-6.1 partial). Thin: the work is in `crate::meetings`.
+//! `list_meetings`, `get_meeting`, `rename_speaker`, `get_segment_audio`, `export_meeting`
+//! (FR-3.3, FR-3.8, FR-6.1, FR-7.1). Thin: the work is in `crate::meetings`.
 
 use tauri::ipc::Response;
 use tauri::State;
 
 use crate::error::AppError;
-use crate::meetings::{MeetingDetail, MeetingListItem, MeetingService, Page};
+use crate::meetings::{ExportFormat, MeetingDetail, MeetingListItem, MeetingService, Page};
 use crate::store::segments::Speaker;
 
 /// Runs database and decoding work off the main thread.
@@ -55,4 +55,19 @@ pub async fn get_segment_audio(
 ) -> Result<Response, AppError> {
     let wav = blocking(&service, move |s| s.segment_audio(&segment_id)).await?;
     Ok(Response::new(wav))
+}
+
+/// Saves an export the window rendered (`text`) to the path picked in the save dialog.
+#[tauri::command]
+pub async fn export_meeting(
+    service: State<'_, MeetingService>,
+    id: String,
+    format: ExportFormat,
+    path: String,
+    text: String,
+) -> Result<String, AppError> {
+    blocking(&service, move |s| {
+        s.export(&id, format, std::path::Path::new(&path), &text)
+    })
+    .await
 }

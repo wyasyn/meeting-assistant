@@ -27,6 +27,8 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             tray::show_main_window(app);
         }))
+        // Save dialogs for exports (FR-7.1).
+        .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_autostart::Builder::new()
                 .arg(MINIMIZED_ARG)
@@ -167,6 +169,7 @@ pub fn run() {
             commands::meetings::get_meeting,
             commands::meetings::rename_speaker,
             commands::meetings::get_segment_audio,
+            commands::meetings::export_meeting,
         ])
         .build(tauri::generate_context!());
 

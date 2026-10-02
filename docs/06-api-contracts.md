@@ -17,7 +17,7 @@ Names here are the contract between UI, core, sidecar and providers. Changing on
 | `update_segment_text` | `{ segmentId, text }` | `Segment` | FR-3.7 |
 | `set_action_item_done` | `{ id, done }` | `ActionItem` | FR-6.5 |
 | `reprocess` | `{ meetingId, fromStep }` | `void` | FR-4.6 |
-| `export_meeting` | `{ id, format: "md" \| "pdf" \| "docx" \| "srt" \| "json", path }` | `string` (path) | FR-7.1 |
+| `export_meeting` | `{ id, format: "md" \| "pdf" \| "docx" \| "srt" \| "json", path, text }` | `string` (path written). `text` is the export the window rendered; `path` comes from the save dialog. Only `md` is written for now (other formats are `invalid_state`); PDF comes from the print dialog (ADR-028). The file is written whole or not at all; a folder that cannot be written is `storage` | FR-7.1 |
 | `add_highlight` | `{ note? }` | `Highlight` | FR-9.1 |
 | `delete_meetings` | `{ ids?: string[], all?: boolean }` | `number` | NFR-15 |
 | `get_settings` / `set_settings` | none / `{ settings: Settings }` | `Settings` | FR-8.3, FR-8.5 |

@@ -3,6 +3,7 @@
 // Components never import `@tauri-apps/api` directly; tests mock this module.
 import { invoke, type InvokeArgs } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { save } from "@tauri-apps/plugin-dialog";
 
 export const APP_ERROR_CODES = [
   "no_api_key",
@@ -420,6 +421,26 @@ export function renameSpeaker(speakerId: string, name: string) {
 /** FR-3.8: the line's audio as a 16 kHz mono WAV file, held in memory only. */
 export function getSegmentAudio(segmentId: string) {
   return call<ArrayBuffer>("get_segment_audio", { segmentId });
+}
+
+/** `export_meeting` formats; only `md` is written for now (PDF comes from the print dialog). */
+export type ExportFormat = "md" | "pdf" | "docx" | "srt" | "json";
+
+/** FR-7.1: saves `text`, rendered by the window, to `path`. Resolves to the path written. */
+export function exportMeeting(id: string, format: ExportFormat, path: string, text: string) {
+  return call<string>("export_meeting", { id, format, path, text });
+}
+
+/** The save dialog. Resolves to the chosen path, or `null` when the user cancels. */
+export async function pickSavePath(
+  defaultPath: string,
+  filter: { name: string; extensions: string[] },
+): Promise<string | null> {
+  try {
+    return await save({ defaultPath, filters: [filter] });
+  } catch (error: unknown) {
+    throw toAppError(error);
+  }
 }
 
 /** Listens to an event and passes only its payload. Resolves to the unlisten function. */

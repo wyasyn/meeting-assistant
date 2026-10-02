@@ -1,10 +1,11 @@
 //! Reading meetings back: recent meetings, one meeting's transcript, renaming speakers
 //! and playing a line (FR-3.3, FR-3.8, FR-6.1 partial, ADR-022).
 
-use std::path::PathBuf;
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::capture::playback::track_wav;
 use crate::capture::recorder::RecordingTarget;
@@ -28,6 +29,18 @@ pub struct Page<T> {
     pub items: Vec<T>,
     /// Pass back as `cursor` for the next page; `None` on the last page.
     pub next_cursor: Option<String>,
+}
+
+/// `export_meeting` formats (docs/06). Only Markdown is written by the core; PDF comes
+/// from the window's print dialog and the others are not built yet (ADR-028).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ExportFormat {
+    Md,
+    Pdf,
+    Docx,
+    Srt,
+    Json,
 }
 
 /// One row of the library (FR-6.1): the meeting, who was in it and its scores.
@@ -174,6 +187,50 @@ impl MeetingService {
     }
 }
 
+impl MeetingService {
+    /// Writes an export the window rendered to the file the user picked in the save dialog
+    /// (FR-7.1). The file appears whole or not at all. Returns the path written.
+    pub fn export(
+        &self,
+        id: &str,
+        format: ExportFormat,
+        path: &Path,
+        text: &str,
+    ) -> Result<String, AppError> {
+        if format != ExportFormat::Md {
+            return Err(AppError::InvalidState(
+                "Only Markdown files can be saved for now. Use Export PDF to print to a PDF."
+                    .into(),
+            ));
+        }
+        if MeetingRepo::new(&*self.store.conn()?).get(id)?.is_none() {
+            return Err(AppError::NotFound(NO_MEETING.into()));
+        }
+        let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
+            return Err(AppError::InvalidState("Choose a file to save to.".into()));
+        };
+        if !path.is_absolute() {
+            return Err(AppError::InvalidState("Choose a file to save to.".into()));
+        }
+        let tmp = dir.join(format!(".{}.tmp", name.to_string_lossy()));
+        let written = std::fs::File::create(&tmp)
+            .and_then(|mut f| {
+                f.write_all(text.as_bytes())?;
+                f.sync_all()
+            })
+            .and_then(|()| std::fs::rename(&tmp, path));
+        if let Err(e) = written {
+            let _ = std::fs::remove_file(&tmp);
+            tracing::debug!(error = %e, "export failed");
+            return Err(AppError::Storage(
+                "Could not save the file. Check that you can write to that folder.".into(),
+            ));
+        }
+        tracing::info!("meeting exported");
+        Ok(path.to_string_lossy().into_owned())
+    }
+}
+
 fn summary(row: MeetingRow) -> MeetingSummary {
     MeetingSummary {
         id: row.id,
@@ -309,6 +366,43 @@ mod tests {
             "not_found"
         );
         assert_eq!(h.service.detail("missing").unwrap_err().code(), "not_found");
+    }
+
+    #[test]
+    fn fr_7_1_markdown_export_is_written_whole() {
+        let h = harness("export");
+        let path = h.service.data_dir.join("Standup.md");
+        let written = h
+            .service
+            .export(&h.meeting_id, ExportFormat::Md, &path, "# Standup\n")
+            .unwrap();
+        assert_eq!(written, path.to_string_lossy());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "# Standup\n");
+        // Saving again replaces the file and leaves no temporary file behind.
+        h.service
+            .export(&h.meeting_id, ExportFormat::Md, &path, "# Again\n")
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "# Again\n");
+        assert_eq!(std::fs::read_dir(&h.service.data_dir).unwrap().count(), 1);
+
+        let err = |id: &str, format, path: &Path| {
+            h.service.export(id, format, path, "x").unwrap_err().code()
+        };
+        assert_eq!(
+            err(&h.meeting_id, ExportFormat::Pdf, &path),
+            "invalid_state"
+        );
+        assert_eq!(err("missing", ExportFormat::Md, &path), "not_found");
+        assert_eq!(
+            err(&h.meeting_id, ExportFormat::Md, Path::new("relative.md")),
+            "invalid_state"
+        );
+        let nowhere = h.service.data_dir.join("no-such-dir").join("x.md");
+        assert_eq!(err(&h.meeting_id, ExportFormat::Md, &nowhere), "storage");
+        assert_eq!(
+            serde_json::from_value::<ExportFormat>("md".into()).unwrap(),
+            ExportFormat::Md
+        );
     }
 
     #[test]

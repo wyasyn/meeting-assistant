@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { flushSync } from "react-dom";
 import { Tabs } from "radix-ui";
 import { Button } from "@/components/ui/button";
+import { ExportActions } from "@/features/export/ExportActions";
 import { ReportView } from "@/features/report/ReportView";
 import { TranscriptView } from "@/features/transcript/TranscriptView";
 import { getMeeting, toAppError, type MeetingDetail } from "@/lib/ipc";
@@ -31,10 +33,27 @@ export function MeetingView({ meetingId, onBack }: { meetingId: string; onBack: 
     };
   }, [meetingId]);
 
+  /** FR-7.1: prints the report with every "Why" open; "Print to file" makes the PDF. */
+  function printReport() {
+    flushSync(() => {
+      setTab("report");
+    });
+    const closed = [...document.querySelectorAll("details")].filter((d) => !d.open);
+    for (const d of closed) d.open = true;
+    window.addEventListener(
+      "afterprint",
+      () => {
+        for (const d of closed) d.open = false;
+      },
+      { once: true },
+    );
+    window.print();
+  }
+
   return (
     <section className="flex w-full max-w-2xl flex-col gap-4">
       <div className="flex items-center gap-2">
-        <Button type="button" variant="ghost" size="sm" onClick={onBack}>
+        <Button type="button" variant="ghost" size="sm" className="print:hidden" onClick={onBack}>
           Back
         </Button>
         <h2 className="truncate text-lg font-semibold">{detail?.meeting.title}</h2>
@@ -52,7 +71,10 @@ export function MeetingView({ meetingId, onBack }: { meetingId: string; onBack: 
           }}
           className="flex flex-col gap-4"
         >
-          <Tabs.List aria-label="Meeting" className="flex gap-1">
+          <div className="print:hidden">
+            <ExportActions detail={detail} onPrint={printReport} />
+          </div>
+          <Tabs.List aria-label="Meeting" className="flex gap-1 print:hidden">
             <Tabs.Trigger value="report" className={TAB_CLASS}>
               Report
             </Tabs.Trigger>

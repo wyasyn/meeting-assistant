@@ -40,6 +40,23 @@ describe("MeetingView (FR-4.3)", () => {
     expect(screen.getByRole("button", { name: /Friday works/ })).toHaveFocus();
   });
 
+  it("prints the report with every why open for PDF export (FR-7.1)", async () => {
+    let open: boolean[] = [];
+    const print = vi.spyOn(window, "print").mockImplementation(() => {
+      open = [...document.querySelectorAll("details")].map((d) => d.open);
+    });
+    render(<MeetingView meetingId="m1" onBack={vi.fn()} />);
+    await userEvent.click(await screen.findByRole("tab", { name: "Transcript" }));
+    await userEvent.click(screen.getByRole("button", { name: "Export PDF" }));
+
+    expect(print).toHaveBeenCalled();
+    expect(screen.getByRole("tab", { name: "Report" })).toHaveAttribute("aria-selected", "true");
+    expect(open).toHaveLength(4);
+    expect(open.every(Boolean)).toBe(true);
+    window.dispatchEvent(new Event("afterprint"));
+    expect([...document.querySelectorAll("details")].some((d) => d.open)).toBe(false);
+  });
+
   it("shows why the meeting could not load", async () => {
     getMock.mockRejectedValue(
       new AppError({
