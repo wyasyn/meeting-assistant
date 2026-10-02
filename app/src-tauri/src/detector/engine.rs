@@ -105,14 +105,23 @@ impl Engine {
             .or_else(|| stream.pid.and_then(|pid| self.pids.get(&pid).copied()))
     }
 
+    /// Known apps holding a mic stream now.
+    pub fn holding(&self) -> HashSet<SourceApp> {
+        self.streams
+            .values()
+            .filter_map(|s| self.app_of(s))
+            .collect()
+    }
+
+    /// Known apps whose process was in the last scan.
+    pub fn running(&self) -> &HashSet<SourceApp> {
+        &self.running
+    }
+
     /// Advances to `now`. While `recording`, nothing is signalled and apps holding the mic
     /// count as signalled, so stopping mid-call does not prompt for the same meeting.
     pub fn tick(&mut self, now: Instant, recording: bool) -> Vec<Detection> {
-        let holding: HashSet<SourceApp> = self
-            .streams
-            .values()
-            .filter_map(|s| self.app_of(s))
-            .collect();
+        let holding = self.holding();
         let mut out = Vec::new();
         for app in SourceApp::ALL {
             let state = self.apps.entry(app).or_default();

@@ -5,6 +5,7 @@ import { APP_NAME } from "@/config";
 import {
   getRecordingState,
   onMeetingDetected,
+  onMeetingEnded,
   onMeetingPromptClosed,
   onRecordingLevels,
   onRecordingState,
@@ -21,6 +22,7 @@ vi.mock("@/lib/ipc", async (importOriginal) => ({
   onRecordingLevels: vi.fn(() => Promise.resolve(() => undefined)),
   onMeetingDetected: vi.fn(() => Promise.resolve(() => undefined)),
   onMeetingPromptClosed: vi.fn(() => Promise.resolve(() => undefined)),
+  onMeetingEnded: vi.fn(() => Promise.resolve(() => undefined)),
   listAppRules: vi.fn(() => Promise.resolve([])),
 }));
 
@@ -44,5 +46,6 @@ describe("App", () => {
     render(<App />);
     expect(onMeetingDetected).toHaveBeenCalled();
     expect(onMeetingPromptClosed).toHaveBeenCalled();
+    expect(onMeetingEnded).toHaveBeenCalled();
   });
 });

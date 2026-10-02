@@ -183,6 +183,22 @@ export function onMeetingPromptClosed(handler: (closed: MeetingPromptClosed) => 
   return on<MeetingPromptClosed>("meeting:prompt-closed", handler);
 }
 
+/** Why the recorded meeting seems over (FR-1.6). */
+export type EndReason = "app_closed" | "mic_released" | "silence";
+
+/** Mirrors Rust `consent::EndPrompt`; the `meeting:ended` payload. Closed by `meeting:prompt-closed`. */
+export interface MeetingEnded {
+  signalId: string;
+  meetingId: string;
+  sourceApp: DetectedApp | null;
+  reason: EndReason;
+}
+
+/** The recording's meeting seems over: ask whether to stop. Never stops by itself. */
+export function onMeetingEnded(handler: (ended: MeetingEnded) => void) {
+  return on<MeetingEnded>("meeting:ended", handler);
+}
+
 /** Mirrors Rust `store::app_rules::AppRule` (FR-1.7). */
 export type AppRule = "ask" | "always" | "never";
 

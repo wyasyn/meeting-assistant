@@ -37,8 +37,8 @@ Names here are the contract between UI, core, sidecar and providers. Changing on
 | Event | Payload |
 | --- | --- |
 | `meeting:detected` | `{ signalId, sourceApp: "zoom" \| "slack" \| "teams" \| "discord" \| "browser", title: string \| null, confidence }` (0 to 1; `title` null until extension/calendar; never while recording). Sent only when the app's rule is `ask`: it is the consent prompt (FR-1.3); `never` drops the detection and `always` starts recording instead |
-| `meeting:prompt-closed` | `{ signalId }`: the prompt was answered on the notification, a recording started, or `never` was set for the app; the window removes it |
-| `meeting:ended` | `{ meetingId }` |
+| `meeting:prompt-closed` | `{ signalId }`: a consent prompt was answered on the notification, a recording started, or `never` was set for the app; or an end prompt (same `signalId` as its `meeting:ended`) was answered or is moot. The window removes it |
+| `meeting:ended` | `{ signalId, meetingId, sourceApp: string \| null, reason: "app_closed" \| "mic_released" \| "silence" }`: the recorded meeting seems over, so the window asks "Meeting over?" (FR-1.6). Never stops the recording by itself; closed with `meeting:prompt-closed { signalId }` when answered on the notification, replaced by a newer end, or the recording stops |
 | `recording:state` | `RecordingState` |
 | `recording:levels` | `{ micDb, sysDb }` (≤10 Hz), dBFS from -90 to 0; `null` when that device sent no audio in the last 100 ms |
 | `caption:segment` | `Segment` (live captions, FR-3.5) |

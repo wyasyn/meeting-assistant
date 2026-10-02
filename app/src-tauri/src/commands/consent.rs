@@ -1,9 +1,9 @@
-//! Consent prompt and app rules (FR-1.3, FR-1.7). Thin: the work is in `crate::consent`.
+//! Consent prompt, end prompt and app rules (FR-1.3, FR-1.6, FR-1.7). Thin: the work is in `crate::consent`.
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Runtime, State};
 
-use crate::consent::{AppRuleEntry, ConsentEvents, ConsentService};
+use crate::consent::{AppRuleEntry, ConsentEvents, ConsentService, EndPrompt};
 use crate::detector::apps::SourceApp;
 use crate::detector::MeetingDetected;
 use crate::error::AppError;
@@ -12,6 +12,7 @@ use crate::tray;
 
 pub const DETECTED_EVENT: &str = "meeting:detected";
 pub const PROMPT_CLOSED_EVENT: &str = "meeting:prompt-closed";
+pub const ENDED_EVENT: &str = "meeting:ended";
 
 /// Payload of `meeting:prompt-closed`.
 #[derive(Debug, Clone, Serialize)]
@@ -43,6 +44,10 @@ impl<R: Runtime> ConsentEvents for TauriConsentEvents<R> {
                 signal_id: signal_id.into(),
             },
         );
+    }
+
+    fn ended(&self, prompt: &EndPrompt) {
+        self.emit(ENDED_EVENT, prompt.clone());
     }
 
     fn show_window(&self) {

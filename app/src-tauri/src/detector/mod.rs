@@ -1,8 +1,10 @@
 //! Meeting detection (FR-1.1, FR-1.2, ADR-016): process watch plus mic streams, and later
-//! extension messages and the calendar. Detection never records: it only emits
-//! `meeting:detected`, and recording still starts from a user action (rule 1).
+//! extension messages and the calendar. Detection never records: it only reports meetings
+//! to `DetectorEvents` (consent decides what happens, rule 1). While recording it also
+//! reports the meeting ending (FR-1.6, ADR-018).
 
 pub mod apps;
+pub mod end;
 pub mod engine;
 #[cfg(target_os = "linux")]
 mod pipewire;
@@ -16,6 +18,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 
 use apps::SourceApp;
+use end::{EndReason, EndWatch};
 use engine::Engine;
 
 const TICK: Duration = Duration::from_secs(1);
@@ -33,6 +36,23 @@ pub struct MeetingDetected {
     pub title: Option<String>,
     /// 0 to 1.
     pub confidence: f64,
+}
+
+/// The recording in progress (running or paused), as the detector sees it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveRecording {
+    pub meeting_id: String,
+    /// `None` for a recording started by hand.
+    pub source_app: Option<SourceApp>,
+}
+
+/// The meeting being recorded seems to be over (FR-1.6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MeetingEnded {
+    pub meeting_id: String,
+    /// The app that closed or let go of the mic; `None` for silence in a recording by hand.
+    pub source_app: Option<SourceApp>,
+    pub reason: EndReason,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,9 +122,10 @@ impl Drop for StreamWatch {
     }
 }
 
-/// Where detections go: the `meeting:detected` event in the app, a fake in tests.
+/// Where detections go: consent in the app, a fake in tests.
 pub trait DetectorEvents: Send + Sync {
     fn detected(&self, signal: &MeetingDetected);
+    fn ended(&self, ended: &MeetingEnded);
 }
 
 /// Mic streams on this OS.
@@ -133,13 +154,17 @@ impl MicStreamSource for Unsupported {
     }
 }
 
+/// The recording in progress, if any.
+pub type RecordingProbe = Box<dyn Fn() -> Option<ActiveRecording> + Send>;
+
 /// One detection step at a time; the service thread drives it every `TICK`.
 struct Worker {
     engine: Engine,
+    end_watch: EndWatch,
     processes: Box<dyn ProcessSource>,
     streams: Box<dyn MicStreamSource>,
     events: Arc<dyn DetectorEvents>,
-    is_recording: Box<dyn Fn() -> bool + Send>,
+    recording: RecordingProbe,
     watch: Option<(StreamWatch, Receiver<StreamEvent>)>,
     next_watch: Option<Instant>,
     next_scan: Option<Instant>,
@@ -150,14 +175,15 @@ impl Worker {
         processes: Box<dyn ProcessSource>,
         streams: Box<dyn MicStreamSource>,
         events: Arc<dyn DetectorEvents>,
-        is_recording: Box<dyn Fn() -> bool + Send>,
+        recording: RecordingProbe,
     ) -> Self {
         Self {
             engine: Engine::new(std::process::id()),
+            end_watch: EndWatch::default(),
             processes,
             streams,
             events,
-            is_recording,
+            recording,
             watch: None,
             next_watch: None,
             next_scan: None,
@@ -209,7 +235,29 @@ impl Worker {
             }
         }
 
-        for detection in self.engine.tick(now, (self.is_recording)()) {
+        let recording = (self.recording)();
+        let ends = self.end_watch.tick(
+            now,
+            recording.as_ref(),
+            &self.engine.holding(),
+            self.engine.running(),
+        );
+        if let Some(recording) = &recording {
+            for end in ends {
+                tracing::info!(
+                    source_app = end.app.as_str(),
+                    reason = end.reason.as_str(),
+                    "meeting ended"
+                );
+                self.events.ended(&MeetingEnded {
+                    meeting_id: recording.meeting_id.clone(),
+                    source_app: Some(end.app),
+                    reason: end.reason,
+                });
+            }
+        }
+
+        for detection in self.engine.tick(now, recording.is_some()) {
             let signal = MeetingDetected {
                 signal_id: uuid::Uuid::now_v7().to_string(),
                 source_app: detection.app,
@@ -238,10 +286,10 @@ impl DetectorService {
         processes: Box<dyn ProcessSource>,
         streams: Box<dyn MicStreamSource>,
         events: Arc<dyn DetectorEvents>,
-        is_recording: Box<dyn Fn() -> bool + Send>,
+        recording: RecordingProbe,
     ) -> Self {
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
-        let mut worker = Worker::new(processes, streams, events, is_recording);
+        let mut worker = Worker::new(processes, streams, events, recording);
         let thread = std::thread::Builder::new()
             .name("detector".into())
             .spawn(move || loop {
@@ -282,8 +330,6 @@ impl DetectorService {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicBool, Ordering};
-
     use super::*;
 
     struct FakeProcesses(Vec<ProcessInfo>);
@@ -311,17 +357,28 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct FakeEvents(Mutex<Vec<MeetingDetected>>);
+    struct FakeEvents(Mutex<Vec<MeetingDetected>>, Mutex<Vec<MeetingEnded>>);
 
     impl DetectorEvents for FakeEvents {
         fn detected(&self, signal: &MeetingDetected) {
             self.0.lock().unwrap().push(signal.clone());
         }
+        fn ended(&self, ended: &MeetingEnded) {
+            self.1.lock().unwrap().push(ended.clone());
+        }
     }
 
     type Senders = Arc<Mutex<Vec<Sender<StreamEvent>>>>;
+    type Recording = Arc<Mutex<Option<ActiveRecording>>>;
 
-    fn worker(recording: Arc<AtomicBool>, fail: bool) -> (Worker, Senders, Arc<FakeEvents>) {
+    fn zoom_recording() -> Recording {
+        Arc::new(Mutex::new(Some(ActiveRecording {
+            meeting_id: "m1".into(),
+            source_app: Some(SourceApp::Zoom),
+        })))
+    }
+
+    fn worker(recording: Recording, fail: bool) -> (Worker, Senders, Arc<FakeEvents>) {
         let senders = Arc::new(Mutex::new(Vec::new()));
         let events = Arc::new(FakeEvents::default());
         let worker = Worker::new(
@@ -334,7 +391,7 @@ mod tests {
                 fail,
             }),
             events.clone(),
-            Box::new(move || recording.load(Ordering::SeqCst)),
+            Box::new(move || recording.lock().unwrap().clone()),
         );
         (worker, senders, events)
     }
@@ -371,14 +428,41 @@ mod tests {
 
     #[test]
     fn fr_1_3_no_signal_while_recording() {
-        let recording = Arc::new(AtomicBool::new(true));
-        let (mut worker, senders, events) = worker(recording, false);
+        let (mut worker, senders, events) = worker(zoom_recording(), false);
         let t0 = Instant::now();
         worker.step(t0);
         senders.lock().unwrap()[0].send(zoom_stream(7)).unwrap();
         for s in 1..=20 {
             worker.step(t0 + Duration::from_secs(s));
         }
+        assert!(events.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn fr_1_6_mic_released_while_recording_reports_the_end() {
+        let (mut worker, senders, events) = worker(zoom_recording(), false);
+        let t0 = Instant::now();
+        worker.step(t0);
+        senders.lock().unwrap()[0].send(zoom_stream(7)).unwrap();
+        worker.step(t0 + Duration::from_secs(1));
+        senders.lock().unwrap()[0]
+            .send(StreamEvent::Closed { id: 7 })
+            .unwrap();
+        // The zoom process is still up, so only the grace ends it.
+        for s in 2..=31 {
+            worker.step(t0 + Duration::from_secs(s));
+        }
+        assert!(events.1.lock().unwrap().is_empty());
+        worker.step(t0 + Duration::from_secs(32));
+        let ended = events.1.lock().unwrap().clone();
+        assert_eq!(
+            ended,
+            [MeetingEnded {
+                meeting_id: "m1".into(),
+                source_app: Some(SourceApp::Zoom),
+                reason: EndReason::MicReleased,
+            }]
+        );
         assert!(events.0.lock().unwrap().is_empty());
     }
 

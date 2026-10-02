@@ -2,7 +2,8 @@
 //! through here: `never` drops it, `always` starts recording (the rule is the user's
 //! action, rule 1) and `ask` shows the prompt, both as a notification with Record /
 //! Not now / Never and as `meeting:detected` for the window. Whichever is answered first
-//! wins; the other is closed.
+//! wins; the other is closed. When the recorded meeting seems over (FR-1.6, ADR-018) it
+//! asks the same way, with Stop recording / Keep recording; it never stops by itself.
 
 #[cfg(target_os = "linux")]
 mod desktop;
@@ -13,7 +14,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use serde::Serialize;
 
 use crate::detector::apps::SourceApp;
-use crate::detector::{DetectorEvents, MeetingDetected};
+use crate::detector::end::EndReason;
+use crate::detector::{ActiveRecording, DetectorEvents, MeetingDetected, MeetingEnded};
 use crate::error::AppError;
 use crate::recording::{Phase, RecordingService};
 use crate::store::app_rules::{AppRule, AppRulesRepo};
@@ -26,6 +28,7 @@ pub enum Choice {
     NotNow,
     Never,
     Stop,
+    Keep,
     /// Clicked the notification itself.
     Open,
     /// Closed without a choice: by the user, a timeout or `Notifier::close`.
@@ -41,6 +44,7 @@ impl Choice {
             Self::NotNow => "not-now",
             Self::Never => "never",
             Self::Stop => "stop",
+            Self::Keep => "keep",
             Self::Open => "default",
             Self::Dismissed => "dismissed",
         }
@@ -53,6 +57,7 @@ impl Choice {
             Self::NotNow,
             Self::Never,
             Self::Stop,
+            Self::Keep,
             Self::Open,
         ]
         .into_iter()
@@ -89,6 +94,7 @@ pub trait Notifier: Send + Sync {
 pub trait RecordingControl: Send + Sync {
     fn start_for(&self, app: SourceApp) -> Result<(), AppError>;
     fn stop(&self) -> Result<(), AppError>;
+    fn active(&self) -> Option<ActiveRecording>;
 }
 
 impl RecordingControl for RecordingService {
@@ -100,6 +106,10 @@ impl RecordingControl for RecordingService {
     fn stop(&self) -> Result<(), AppError> {
         RecordingService::stop(self).map(drop)
     }
+
+    fn active(&self) -> Option<ActiveRecording> {
+        RecordingService::active(self)
+    }
 }
 
 /// Where prompts go in the window: Tauri events in the app, a fake in tests.
@@ -108,7 +118,19 @@ pub trait ConsentEvents: Send + Sync {
     fn prompt(&self, signal: &MeetingDetected);
     /// `meeting:prompt-closed`: the prompt was answered or is no longer needed.
     fn prompt_closed(&self, signal_id: &str);
+    /// `meeting:ended`: the window asks whether to stop.
+    fn ended(&self, prompt: &EndPrompt);
     fn show_window(&self);
+}
+
+/// Payload of `meeting:ended` (FR-1.6). Closed with `meeting:prompt-closed` like a prompt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EndPrompt {
+    pub signal_id: String,
+    pub meeting_id: String,
+    pub source_app: Option<SourceApp>,
+    pub reason: EndReason,
 }
 
 /// One row of `list_app_rules`.
@@ -156,6 +178,13 @@ struct Open {
     prompts: HashMap<String, Prompt>,
     /// "Recording" note with a Stop button, after a rule started the recording.
     rule_note: Option<NoteId>,
+    /// The "Meeting over?" prompt; one at a time.
+    end: Option<OpenEnd>,
+}
+
+struct OpenEnd {
+    signal_id: String,
+    note: Option<NoteId>,
 }
 
 struct Shared {
@@ -224,8 +253,88 @@ impl ConsentService {
                 if let Some(note) = note {
                     self.0.notifier.close(note);
                 }
+                self.close_end();
             }
             Phase::Paused => {}
+        }
+    }
+
+    /// Asks whether to stop, if `ended` is about the recording still in progress.
+    pub fn meeting_ended(&self, ended: &MeetingEnded) {
+        let Some(active) = self
+            .0
+            .recorder
+            .active()
+            .filter(|active| active.meeting_id == ended.meeting_id)
+        else {
+            return;
+        };
+        // A newer reason replaces an unanswered prompt.
+        self.close_end();
+        let prompt = EndPrompt {
+            signal_id: uuid::Uuid::now_v7().to_string(),
+            meeting_id: ended.meeting_id.clone(),
+            source_app: ended.source_app.or(active.source_app),
+            reason: ended.reason,
+        };
+        let signal_id = prompt.signal_id.clone();
+        self.open().end = Some(OpenEnd {
+            signal_id: signal_id.clone(),
+            note: None,
+        });
+        self.0.events.ended(&prompt);
+
+        let service = self.clone();
+        let answered_id = signal_id.clone();
+        let note = self.0.notifier.show(
+            end_note(&prompt),
+            Box::new(move |choice| service.answer_end(&answered_id, choice)),
+        );
+        if let Some(note) = note {
+            let mut open = self.open();
+            match open.end.as_mut().filter(|end| end.signal_id == signal_id) {
+                Some(end) => end.note = Some(note),
+                None => {
+                    drop(open);
+                    self.0.notifier.close(note);
+                }
+            }
+        }
+    }
+
+    fn answer_end(&self, signal_id: &str, choice: Choice) {
+        let mut open = self.open();
+        let Some(end) = open.end.as_mut().filter(|end| end.signal_id == signal_id) else {
+            return;
+        };
+        end.note = None;
+        match choice {
+            Choice::Dismissed => return,
+            Choice::Open => {
+                drop(open);
+                self.0.events.show_window();
+                return;
+            }
+            _ => {}
+        }
+        open.end = None;
+        drop(open);
+        self.0.events.prompt_closed(signal_id);
+        if choice == Choice::Stop {
+            if let Err(err) = self.0.recorder.stop() {
+                tracing::warn!(%err, "could not stop the recording from the notification");
+                self.show_error(&err);
+            }
+        }
+    }
+
+    fn close_end(&self) {
+        let end = self.open().end.take();
+        if let Some(end) = end {
+            if let Some(note) = end.note {
+                self.0.notifier.close(note);
+            }
+            self.0.events.prompt_closed(&end.signal_id);
         }
     }
 
@@ -312,7 +421,7 @@ impl ConsentService {
                 self.0.events.show_window();
                 return;
             }
-            Choice::Record | Choice::NotNow | Choice::Never | Choice::Stop => {}
+            Choice::Record | Choice::NotNow | Choice::Never | Choice::Stop | Choice::Keep => {}
         }
         open.prompts.remove(signal_id);
         drop(open);
@@ -398,6 +507,33 @@ impl DetectorEvents for ConsentService {
     fn detected(&self, signal: &MeetingDetected) {
         self.on_detected(signal);
     }
+
+    fn ended(&self, ended: &MeetingEnded) {
+        self.meeting_ended(ended);
+    }
+}
+
+/// Same words as the window prompt (`app/src/features/consent/apps.ts`).
+fn end_note(prompt: &EndPrompt) -> Note {
+    let who = match prompt.source_app {
+        Some(SourceApp::Browser) => "Your browser",
+        Some(app) => app.label(),
+        None => "The meeting app",
+    };
+    let body = match prompt.reason {
+        EndReason::AppClosed => format!("{who} closed."),
+        EndReason::MicReleased => format!("{who} stopped using your microphone."),
+        EndReason::Silence => "No sound for 2 minutes.".to_owned(),
+    };
+    Note {
+        summary: "Meeting over?".into(),
+        body,
+        buttons: vec![
+            (Choice::Stop, "Stop recording".into()),
+            (Choice::Keep, "Keep recording".into()),
+        ],
+        sticky: true,
+    }
 }
 
 /// Same words as the window prompt (`app/src/features/consent/apps.ts`).
@@ -463,6 +599,7 @@ mod tests {
         starts: Mutex<Vec<SourceApp>>,
         stops: Mutex<u32>,
         fail: bool,
+        active: Mutex<Option<ActiveRecording>>,
     }
 
     impl RecordingControl for FakeRecorder {
@@ -477,10 +614,14 @@ mod tests {
             *self.stops.lock().unwrap() += 1;
             Ok(())
         }
+        fn active(&self) -> Option<ActiveRecording> {
+            self.active.lock().unwrap().clone()
+        }
     }
 
     #[derive(Default)]
     struct FakeEvents {
+        ends: Mutex<Vec<EndPrompt>>,
         prompts: Mutex<Vec<String>>,
         closed: Mutex<Vec<String>>,
         windows: Mutex<u32>,
@@ -492,6 +633,9 @@ mod tests {
         }
         fn prompt_closed(&self, signal_id: &str) {
             self.closed.lock().unwrap().push(signal_id.into());
+        }
+        fn ended(&self, prompt: &EndPrompt) {
+            self.ends.lock().unwrap().push(prompt.clone());
         }
         fn show_window(&self) {
             *self.windows.lock().unwrap() += 1;
@@ -750,6 +894,132 @@ mod tests {
         );
     }
 
+    impl Harness {
+        fn recording(&self, app: Option<SourceApp>) {
+            *self.recorder.active.lock().unwrap() = Some(ActiveRecording {
+                meeting_id: "m1".into(),
+                source_app: app,
+            });
+        }
+
+        fn end(&self, app: Option<SourceApp>, reason: EndReason) {
+            self.service.ended(&MeetingEnded {
+                meeting_id: "m1".into(),
+                source_app: app,
+                reason,
+            });
+        }
+
+        fn ends(&self) -> Vec<EndPrompt> {
+            self.events.ends.lock().unwrap().clone()
+        }
+    }
+
+    #[test]
+    fn fr_1_6_meeting_end_asks_and_stop_stops() {
+        let h = harness();
+        h.recording(Some(SourceApp::Zoom));
+        h.end(Some(SourceApp::Zoom), EndReason::AppClosed);
+        let ends = h.ends();
+        assert_eq!(ends.len(), 1);
+        assert_eq!(ends[0].meeting_id, "m1");
+        assert_eq!(ends[0].reason, EndReason::AppClosed);
+        let note = h.notifier.note(0);
+        assert_eq!(note.summary, "Meeting over?");
+        assert_eq!(note.body, "Zoom closed.");
+        assert_eq!(
+            note.buttons,
+            [
+                (Choice::Stop, "Stop recording".to_owned()),
+                (Choice::Keep, "Keep recording".to_owned()),
+            ]
+        );
+        assert_eq!(
+            *h.recorder.stops.lock().unwrap(),
+            0,
+            "never stops by itself"
+        );
+
+        h.notifier.choose(0, Choice::Stop);
+        assert_eq!(*h.recorder.stops.lock().unwrap(), 1);
+        assert_eq!(h.closed(), [ends[0].signal_id.clone()]);
+    }
+
+    #[test]
+    fn fr_1_6_keep_recording_closes_the_prompt_only() {
+        let h = harness();
+        h.recording(Some(SourceApp::Browser));
+        h.end(Some(SourceApp::Browser), EndReason::MicReleased);
+        assert_eq!(
+            h.notifier.note(0).body,
+            "Your browser stopped using your microphone."
+        );
+        h.notifier.choose(0, Choice::Keep);
+        assert_eq!(*h.recorder.stops.lock().unwrap(), 0);
+        assert_eq!(h.closed().len(), 1);
+    }
+
+    #[test]
+    fn fr_1_6_silence_names_the_recordings_app() {
+        let h = harness();
+        h.recording(Some(SourceApp::Teams));
+        h.end(None, EndReason::Silence);
+        assert_eq!(h.ends()[0].source_app, Some(SourceApp::Teams));
+        assert_eq!(h.notifier.note(0).body, "No sound for 2 minutes.");
+    }
+
+    #[test]
+    fn end_of_another_or_no_recording_is_ignored() {
+        let h = harness();
+        h.end(Some(SourceApp::Zoom), EndReason::AppClosed);
+        *h.recorder.active.lock().unwrap() = Some(ActiveRecording {
+            meeting_id: "m2".into(),
+            source_app: None,
+        });
+        h.end(Some(SourceApp::Zoom), EndReason::AppClosed);
+        assert!(h.ends().is_empty());
+        assert_eq!(h.notifier.count(), 0);
+    }
+
+    #[test]
+    fn fr_1_6_stopping_closes_the_end_prompt_and_a_newer_end_replaces_it() {
+        let h = harness();
+        h.recording(None);
+        h.end(Some(SourceApp::Zoom), EndReason::MicReleased);
+        h.end(None, EndReason::Silence);
+        let ends = h.ends();
+        assert_eq!(h.closed(), [ends[0].signal_id.clone()]);
+        // Resuming a paused recording keeps it; stopping closes it.
+        h.service.recording_changed(Phase::Recording);
+        assert_eq!(h.closed().len(), 1);
+        h.service.recording_changed(Phase::Stopped);
+        assert_eq!(
+            h.closed(),
+            [ends[0].signal_id.clone(), ends[1].signal_id.clone()]
+        );
+        assert_eq!(*h.notifier.closed.lock().unwrap(), [NoteId(1), NoteId(2)]);
+        // The closed note reports back as dismissed; nothing else happens.
+        h.notifier.choose(1, Choice::Stop);
+        assert_eq!(*h.recorder.stops.lock().unwrap(), 0);
+    }
+
+    #[test]
+    fn end_prompt_uses_camel_case_on_the_wire() {
+        let json = serde_json::to_value(EndPrompt {
+            signal_id: "s1".into(),
+            meeting_id: "m1".into(),
+            source_app: None,
+            reason: EndReason::Silence,
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "signalId": "s1", "meetingId": "m1", "sourceApp": null, "reason": "silence"
+            })
+        );
+    }
+
     #[test]
     fn notification_keys_round_trip() {
         for choice in [
@@ -757,6 +1027,7 @@ mod tests {
             Choice::NotNow,
             Choice::Never,
             Choice::Stop,
+            Choice::Keep,
             Choice::Open,
         ] {
             assert_eq!(Choice::from_key(choice.key()), choice);

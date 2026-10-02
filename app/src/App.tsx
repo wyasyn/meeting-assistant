@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { APP_NAME } from "@/config";
 import { ConsentPrompts } from "@/features/consent/ConsentPrompts";
+import { EndPrompt } from "@/features/consent/EndPrompt";
 import { initConsent } from "@/features/consent/store";
 import { RecordingControls } from "@/features/recording/RecordingControls";
 import { RecordingIndicator } from "@/features/recording/RecordingIndicator";
@@ -17,6 +18,7 @@ function App() {
       <RecordingIndicator />
       <h1 className="text-2xl font-semibold">{APP_NAME}</h1>
       <ConsentPrompts />
+      <EndPrompt />
       <RecordingControls />
       <AppRules />
       <StartOnLoginToggle />

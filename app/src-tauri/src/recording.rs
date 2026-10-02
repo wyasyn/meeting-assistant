@@ -11,11 +11,17 @@ use serde::Serialize;
 use crate::capture::recorder::{Levels, Recorder, RecordingTarget};
 use crate::capture::{AudioBackend, CaptureConfig, CaptureError};
 use crate::detector::apps::SourceApp;
+use crate::detector::ActiveRecording;
 use crate::error::AppError;
 use crate::store::meetings::{MeetingRepo, MeetingStatus, OpenRecording};
 use crate::store::{now_ms, Store};
 
 const WATCHDOG_INTERVAL: Duration = Duration::from_millis(500);
+/// Both tracks this quiet for `SILENCE_AFTER` suggests the meeting is over (FR-1.6).
+pub const SILENCE_DB: f32 = -50.0;
+pub const SILENCE_AFTER: Duration = Duration::from_secs(120);
+/// A longer gap between level updates is a pause; quiet time restarts after it.
+const LEVEL_GAP: Duration = Duration::from_secs(1);
 const DEFAULT_TITLE: &str = "Recording";
 const DEFAULT_SOURCE_APP: &str = "other";
 
@@ -68,11 +74,48 @@ pub struct MeetingSummary {
 pub trait RecordingEvents: Send + Sync {
     fn state(&self, state: &RecordingState);
     fn levels(&self, levels: Levels);
+    /// Both tracks were quiet for `SILENCE_AFTER` (FR-1.6). Called on the recorder thread.
+    fn silent(&self, meeting_id: &str);
+}
+
+/// Spots `SILENCE_AFTER` of quiet on both tracks; reports once per quiet stretch.
+#[derive(Debug, Default)]
+struct SilenceTracker {
+    last_update: Option<Instant>,
+    quiet_since: Option<Instant>,
+    reported: bool,
+}
+
+impl SilenceTracker {
+    /// True when this update completes a quiet stretch.
+    fn update(&mut self, levels: Levels, now: Instant) -> bool {
+        let resumed = self
+            .last_update
+            .is_none_or(|last| now.saturating_duration_since(last) > LEVEL_GAP);
+        self.last_update = Some(now);
+        // No audio from a device counts as quiet.
+        let quiet = |db: Option<f32>| db.is_none_or(|db| db < SILENCE_DB);
+        if !(quiet(levels.mic_db) && quiet(levels.sys_db)) {
+            self.quiet_since = None;
+            self.reported = false;
+            return false;
+        }
+        if resumed {
+            self.quiet_since = None;
+        }
+        let since = *self.quiet_since.get_or_insert(now);
+        if self.reported || now.saturating_duration_since(since) < SILENCE_AFTER {
+            return false;
+        }
+        self.reported = true;
+        true
+    }
 }
 
 struct Active {
     recorder: Recorder,
     meeting: OpenRecording,
+    source_app: Option<SourceApp>,
     /// Recorded time before the current stretch.
     elapsed: Duration,
     /// Set while recording, `None` while paused.
@@ -142,6 +185,15 @@ impl RecordingService {
             .map_or_else(|| inner.last.clone(), Active::state))
     }
 
+    /// The recording in progress, running or paused.
+    pub fn active(&self) -> Option<ActiveRecording> {
+        let inner = self.lock().ok()?;
+        inner.active.as_ref().map(|active| ActiveRecording {
+            meeting_id: active.meeting.id.clone(),
+            source_app: active.source_app,
+        })
+    }
+
     pub fn start(
         &self,
         title: Option<String>,
@@ -170,11 +222,21 @@ impl RecordingService {
             key: self.0.store.audio_key().clone(),
         };
         let events = Arc::clone(&self.0.events);
+        let silence = Mutex::new(SilenceTracker::default());
+        let meeting_id = meeting.id.clone();
         let started = Recorder::start(
             &*self.0.backend,
             CaptureConfig::default(),
             target.clone(),
-            Box::new(move |levels| events.levels(levels)),
+            Box::new(move |levels| {
+                events.levels(levels);
+                let silent = silence
+                    .lock()
+                    .is_ok_and(|mut s| s.update(levels, Instant::now()));
+                if silent {
+                    events.silent(&meeting_id);
+                }
+            }),
         );
         let recorder = match started {
             Ok(recorder) => recorder,
@@ -186,6 +248,7 @@ impl RecordingService {
         let active = Active {
             recorder,
             meeting: meeting.clone(),
+            source_app: SourceApp::parse(&source_app),
             elapsed: Duration::ZERO,
             resumed_at: Some(Instant::now()),
         };
@@ -400,6 +463,7 @@ mod tests {
             self.states.lock().unwrap().push(state.clone());
         }
         fn levels(&self, _levels: Levels) {}
+        fn silent(&self, _meeting_id: &str) {}
     }
 
     fn service(backend: FakeBackend, dir: &TempDir) -> (RecordingService, Arc<FakeEvents>) {
@@ -484,6 +548,76 @@ mod tests {
         assert_eq!(titled(Some("zoom")), "Zoom meeting");
         assert_eq!(titled(Some("other")), "Recording");
         assert_eq!(titled(None), "Recording");
+    }
+
+    #[test]
+    fn fr_1_6_active_names_the_recording_and_its_app() {
+        let dir = TempDir::new("service-active");
+        let (service, _) = service(live(), &dir);
+        assert_eq!(service.active(), None);
+        let meeting = service.start(None, Some("slack".into())).unwrap();
+        let expected = Some(ActiveRecording {
+            meeting_id: meeting.id,
+            source_app: Some(SourceApp::Slack),
+        });
+        assert_eq!(service.active(), expected);
+        service.pause().unwrap();
+        assert_eq!(service.active(), expected, "paused still counts");
+        service.stop().unwrap();
+        assert_eq!(service.active(), None);
+    }
+
+    #[test]
+    fn fr_1_6_two_quiet_minutes_report_once() {
+        let quiet = Levels {
+            mic_db: Some(-70.0),
+            sys_db: None,
+        };
+        let loud = Levels {
+            mic_db: Some(-20.0),
+            sys_db: Some(-90.0),
+        };
+        let t0 = Instant::now();
+        let ms = |n: u64| t0 + Duration::from_millis(n);
+        let mut tracker = SilenceTracker::default();
+        let mut fired = Vec::new();
+        // 100 ms updates: quiet for 130 s, sound, then quiet again for 130 s.
+        for n in 0..=1_300u64 {
+            if tracker.update(quiet, ms(n * 100)) {
+                fired.push(n * 100);
+            }
+        }
+        assert!(!tracker.update(loud, ms(130_100)));
+        for n in 1_302..=2_602u64 {
+            if tracker.update(quiet, ms(n * 100)) {
+                fired.push(n * 100);
+            }
+        }
+        assert_eq!(fired, [120_000, 250_200]);
+    }
+
+    #[test]
+    fn fr_1_6_paused_time_is_not_quiet_time() {
+        let quiet = Levels {
+            mic_db: None,
+            sys_db: None,
+        };
+        let step = Duration::from_millis(100);
+        let mut t = Instant::now();
+        let mut tracker = SilenceTracker::default();
+        let mut fired = false;
+        // 100 s quiet, a 5 minute pause (no updates), then quiet again.
+        for _ in 0..1_000 {
+            fired |= tracker.update(quiet, t);
+            t += step;
+        }
+        t += Duration::from_secs(300);
+        for _ in 0..1_200 {
+            fired |= tracker.update(quiet, t);
+            t += step;
+        }
+        assert!(!fired, "quiet before the pause does not count");
+        assert!(tracker.update(quiet, t));
     }
 
     #[test]

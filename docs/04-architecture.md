@@ -19,7 +19,7 @@ flowchart LR
 | Module | Responsibility | Key types |
 | --- | --- | --- |
 | `detector` | Watch processes, PipeWire mic/output streams, extension messages, calendar; emit `MeetingDetected` / `MeetingEnded` | `DetectorSource` trait, `MeetingSignal` |
-| `consent` | Apply the per-app rule to each detection; prompt as a notification (Record / Not now / Never) and in the window; start recording on Record or an `always` rule | `ConsentService`, `Notifier` trait, `RecordingControl` |
+| `consent` | Apply the per-app rule to each detection; prompt as a notification (Record / Not now / Never) and in the window; start recording on Record or an `always` rule; ask "Meeting over?" (Stop / Keep recording) when the meeting seems to end | `ConsentService`, `Notifier` trait, `RecordingControl` |
 | `capture` | Record mic + system tracks, encode Opus, write 10 s chunks, live level meters | `AudioBackend` trait (`PipeWireBackend`, `WasapiBackend`, `MacBackend`) |
 | `jobs` | Persistent queue; runs pipeline steps; retries with backoff | `Job`, `Step` enum, `Pipeline` |
 | `metrics` | Deterministic metrics from segments | `MeetingMetrics` |
@@ -56,6 +56,8 @@ flowchart LR
 A prompt fires when (1 or 3) AND (2) are true, or on (3) alone. Debounce: one prompt per meeting.
 
 v1 rules (ADR-016, `detector/engine.rs`): the app owning a capture stream comes from the bound node's `application.process.binary`, else its pid via the process list. A desktop app holding the mic 3 s is a meeting (confidence 0.9 when its process is seen, 0.7 when only the stream names it); a browser needs 10 s (0.5). Each app signals once and re-arms after 60 s without the mic. Nothing is signalled while recording or paused. Our own streams are ignored.
+
+End of meeting (ADR-018, `detector/end.rs`), only while a recording runs or is paused: the recording's app, or for a recording started by hand every known app that holds the mic during it, is watched. Its process gone (when it was seen) is `app_closed`; no mic stream for 30 s is `mic_released`. The recorder reports `silence` when both tracks stay under -50 dBFS for 2 minutes. Each prompts "Meeting over?" once per stretch; the user decides.
 
 ## Security model
 - DB key: random 256-bit key stored in the OS keychain; SQLCipher opens with it. Audio chunks encrypted with the same key (AES-GCM via `aes-gcm`).

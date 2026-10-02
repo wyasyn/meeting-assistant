@@ -71,17 +71,11 @@ pub fn run() {
                 detector::default_processes(),
                 detector::default_streams(),
                 Arc::new(consent),
-                // No meeting:detected while a recording runs or is paused.
+                // No meeting:detected while a recording runs or is paused; its end instead.
                 Box::new(move || {
                     handle
                         .try_state::<recording::RecordingService>()
-                        .and_then(|service| service.state().ok())
-                        .is_some_and(|s| {
-                            matches!(
-                                s.state,
-                                recording::Phase::Recording | recording::Phase::Paused
-                            )
-                        })
+                        .and_then(|service| service.active())
                 }),
             ));
 

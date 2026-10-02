@@ -6,6 +6,8 @@ use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use crate::capture::recorder::Levels;
 use crate::capture::{default_backend, AudioDevice};
 use crate::consent::ConsentService;
+use crate::detector::end::EndReason;
+use crate::detector::MeetingEnded;
 use crate::error::AppError;
 use crate::recording::{MeetingSummary, RecordingEvents, RecordingService, RecordingState};
 use crate::tray;
@@ -35,6 +37,22 @@ impl<R: Runtime> RecordingEvents for TauriEvents<R> {
 
     fn levels(&self, levels: Levels) {
         self.emit(LEVELS_EVENT, levels);
+    }
+
+    fn silent(&self, meeting_id: &str) {
+        let app = self.0.clone();
+        let ended = MeetingEnded {
+            meeting_id: meeting_id.into(),
+            source_app: None,
+            reason: EndReason::Silence,
+        };
+        // Off the recorder thread: consent reads the recording state, whose lock a
+        // pause may hold while it waits for this thread.
+        tauri::async_runtime::spawn_blocking(move || {
+            if let Some(consent) = app.try_state::<ConsentService>() {
+                consent.meeting_ended(&ended);
+            }
+        });
     }
 }
 
