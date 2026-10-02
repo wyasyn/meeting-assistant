@@ -179,9 +179,12 @@ mod tests {
             }]
         );
         assert!(watch.tick(at(t0, 90), Some(&r), &set(&[]), &up).is_empty());
-        // A new stretch with the mic re-arms it.
+        // A new stretch with the mic re-arms it; released at 101, so it ends at 131.
         watch.tick(at(t0, 100), Some(&r), &up, &up);
-        assert_eq!(watch.tick(at(t0, 130), Some(&r), &set(&[]), &up).len(), 1);
+        let ends: Vec<u64> = (101..=140)
+            .filter(|s| !watch.tick(at(t0, *s), Some(&r), &set(&[]), &up).is_empty())
+            .collect();
+        assert_eq!(ends, [131]);
     }
 
     #[test]
@@ -191,9 +194,12 @@ mod tests {
         let mut watch = EndWatch::default();
         let r = rec("m1", Some(Slack));
         watch.tick(t0, Some(&r), &set(&[Slack]), &set(&[]));
-        assert!(watch
-            .tick(at(t0, 29), Some(&r), &set(&[]), &set(&[]))
-            .is_empty());
+        // Released at 1 s, so the grace ends at 31 s.
+        for s in 1..31 {
+            assert!(watch
+                .tick(at(t0, s), Some(&r), &set(&[]), &set(&[]))
+                .is_empty());
+        }
         assert_eq!(
             watch.tick(at(t0, 31), Some(&r), &set(&[]), &set(&[]))[0].reason,
             EndReason::MicReleased
