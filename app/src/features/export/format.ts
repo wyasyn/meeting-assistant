@@ -2,7 +2,7 @@
 // scores and coaching included. The Slack and email texts are for sharing with the other
 // participants, so they leave out the scores and suggestions (docs/07: never score others).
 import { formatElapsed } from "@/features/recording/format";
-import { formatDate, ownerName, SCORE_LABELS } from "@/features/report/labels";
+import { formatCost, formatDate, lineAt, ownerName, SCORE_LABELS } from "@/features/report/labels";
 import { UNKNOWN_SPEAKER } from "@/features/transcript/TranscriptView";
 import type { ActionItem, MeetingDetail } from "@/lib/ipc";
 
@@ -56,6 +56,13 @@ export function toMarkdown(detail: MeetingDetail): string {
   return (
     head +
     `## Summary\n\n${report.summary}\n\n` +
+    mdSection(
+      "Highlights",
+      detail.highlights.map((h) => {
+        const near = lineAt(detail.segments, h.atMs);
+        return `- ${formatElapsed(h.atMs)} ${h.note ?? "Marked moment"}${near ? `: "${near.text}"` : ""}`;
+      }),
+    ) +
     mdSection("Scores", scores.length > 0 ? scores : ["Not enough data to score."]) +
     mdSection(
       "Key points",
@@ -85,7 +92,10 @@ export function toMarkdown(detail: MeetingDetail): string {
       "Chapters",
       report.chapters.map((c) => `- ${formatElapsed(c.startMs)} ${c.title}`),
     ) +
-    transcriptMd(detail)
+    transcriptMd(detail) +
+    (report.costUsd === null
+      ? ""
+      : `\n_Estimated AI cost ${formatCost(report.costUsd)}, analyzed with ${report.modelUsed}._\n`)
   );
 }
 

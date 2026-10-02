@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
+  addHighlight,
   getRecordingState,
   listAudioDevices,
+  onHighlightAdded,
   pauseRecording,
   resumeRecording,
   startRecording,
@@ -10,7 +12,7 @@ import {
   toAppError,
   type AudioDevice,
 } from "@/lib/ipc";
-import { defaultTitle } from "./format";
+import { defaultTitle, formatElapsed } from "./format";
 import { LevelMeter } from "./LevelMeter";
 import { useRecordingStore } from "./store";
 
@@ -23,6 +25,7 @@ export function RecordingControls() {
   const [error, setError] = useState<string | null>(null);
   const phase = recording.state;
   const active = phase === "recording" || phase === "paused";
+  const marks = useHighlights();
 
   async function run(action: () => Promise<unknown>) {
     setBusy(true);
@@ -54,6 +57,12 @@ export function RecordingControls() {
     run(async () => {
       apply(await stopRecording());
     });
+  // FR-9.1: confirmed by `highlight:added`, which the tray and `--highlight` send too.
+  const highlight = () =>
+    run(async () => {
+      await addHighlight();
+    });
+  const mark = active && marks?.meetingId === recording.meetingId ? marks : null;
 
   const message = error ?? (phase === "stopped" ? recording.error : null);
 
@@ -73,6 +82,9 @@ export function RecordingControls() {
           <Button variant="destructive" disabled={busy} onClick={() => void stop()}>
             Stop
           </Button>
+          <Button variant="outline" disabled={busy} onClick={() => void highlight()}>
+            Add highlight
+          </Button>
         </div>
       ) : (
         <Button disabled={busy} onClick={() => void start()}>
@@ -87,6 +99,13 @@ export function RecordingControls() {
         </div>
       )}
 
+      {mark && (
+        <p role="status" className="text-sm text-muted-foreground">
+          Highlight added at {formatElapsed(mark.atMs)}
+          {mark.count > 1 && ` (${String(mark.count)} so far)`}
+        </p>
+      )}
+
       {phase === "stopped" && !message && (
         <p className="text-sm text-muted-foreground">Recording saved.</p>
       )}
@@ -98,6 +117,28 @@ export function RecordingControls() {
       <DefaultDevices />
     </section>
   );
+}
+
+/** The latest highlight and how many the meeting has, from `highlight:added`. */
+function useHighlights() {
+  const [marks, setMarks] = useState<{ meetingId: string; atMs: number; count: number } | null>(
+    null,
+  );
+  useEffect(() => {
+    const unlisten = onHighlightAdded((h) => {
+      setMarks((m) => ({
+        meetingId: h.meetingId,
+        atMs: h.atMs,
+        count: m?.meetingId === h.meetingId ? m.count + 1 : 1,
+      }));
+    });
+    return () => {
+      void unlisten.then((fn) => {
+        fn();
+      });
+    };
+  }, []);
+  return marks;
 }
 
 /** Recording uses the system defaults for now; this shows which devices those are. */

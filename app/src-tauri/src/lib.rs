@@ -19,13 +19,21 @@ use tauri::Manager;
 
 /// Passed by the login item only, so a start on login stays in the tray (FR-8.5).
 const MINIMIZED_ARG: &str = "--minimized";
+/// Marks the current moment of the running recording (FR-9.1). Bind a desktop shortcut to
+/// `<app> --highlight`; a second launch hands it to the running app (ADR-029).
+const HIGHLIGHT_ARG: &str = "--highlight";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
-        // Must be first: a second launch only shows the running window.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            tray::show_main_window(app);
+        // Must be first: a second launch only shows the running window, or adds a highlight.
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if args.iter().any(|arg| arg == HIGHLIGHT_ARG) {
+                let app = app.clone();
+                tauri::async_runtime::spawn_blocking(move || tray::add_highlight(&app));
+            } else {
+                tray::show_main_window(app);
+            }
         }))
         // Save dialogs for exports (FR-7.1).
         .plugin(tauri_plugin_dialog::init())
@@ -134,7 +142,8 @@ pub fn run() {
             ));
 
             tray::init(app.handle())?;
-            if !std::env::args().any(|arg| arg == MINIMIZED_ARG) {
+            // A shortcut pressed while the app was closed starts it in the tray.
+            if !std::env::args().any(|arg| arg == MINIMIZED_ARG || arg == HIGHLIGHT_ARG) {
                 tray::show_main_window(app.handle());
             }
             Ok(())
@@ -157,6 +166,7 @@ pub fn run() {
             commands::recording::pause_recording,
             commands::recording::resume_recording,
             commands::recording::stop_recording,
+            commands::recording::add_highlight,
             commands::recording::get_recording_state,
             commands::recording::list_audio_devices,
             commands::consent::list_app_rules,

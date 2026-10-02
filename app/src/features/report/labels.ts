@@ -76,3 +76,18 @@ export function formatDate(day: string): string {
   if (!y || !m || !d) return day;
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { dateStyle: "medium" });
 }
+
+/** FR-8.4: an estimated cost in US dollars. */
+export function formatCost(usd: number): string {
+  return usd < 0.01 ? "under $0.01" : `$${usd.toFixed(2)}`;
+}
+
+/** The line a highlight falls in: the last one starting at or before it, else the first. */
+export function lineAt<T extends { startMs: number }>(segments: T[], atMs: number): T | undefined {
+  let found: T | undefined;
+  for (const s of segments) {
+    if (s.startMs > atMs) break;
+    found = s;
+  }
+  return found ?? segments[0];
+}

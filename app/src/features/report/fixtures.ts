@@ -97,6 +97,7 @@ export function reportDetail(over: Partial<MeetingDetail> = {}): MeetingDetail {
       score("my_performance", 81),
       score("productivity", 66),
     ],
+    highlights: [{ id: "h1", meetingId: "m1", atMs: 126_000, note: "Release date" }],
     ...over,
   };
 }

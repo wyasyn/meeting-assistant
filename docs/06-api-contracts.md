@@ -18,7 +18,7 @@ Names here are the contract between UI, core, sidecar and providers. Changing on
 | `set_action_item_done` | `{ id, done }` | `ActionItem` | FR-6.5 |
 | `reprocess` | `{ meetingId, fromStep }` | `void` | FR-4.6 |
 | `export_meeting` | `{ id, format: "md" \| "pdf" \| "docx" \| "srt" \| "json", path, text }` | `string` (path written). `text` is the export the window rendered; `path` comes from the save dialog. Only `md` is written for now (other formats are `invalid_state`); PDF comes from the print dialog (ADR-028). The file is written whole or not at all; a folder that cannot be written is `storage` | FR-7.1 |
-| `add_highlight` | `{ note? }` | `Highlight` | FR-9.1 |
+| `add_highlight` | `{ note? }` | `Highlight`: the current moment of the running or paused recording (`invalid_state` otherwise; the note is trimmed, blank means none, over 500 characters is `invalid_state`). Also from the tray and `<app> --highlight` (ADR-029) | FR-9.1 |
 | `delete_meetings` | `{ ids?: string[], all?: boolean }` | `number` | NFR-15 |
 | `get_settings` / `set_settings` | none / `{ settings: Settings }` | `Settings` | FR-8.3, FR-8.5 |
 | `list_providers` | none | `ProviderEntry[]` | FR-8.1 |
@@ -32,6 +32,7 @@ Names here are the contract between UI, core, sidecar and providers. Changing on
 `MeetingListItem`: the `MeetingSummary` fields plus `participants: string[]` (labels of the other side in order of first appearance, "Me" left out) and `scores: { kind, value }[]` (headline scores in display order, empty until scored or with too little data).
 `Page<T> { items: T[], nextCursor: string | null }`: pass `nextCursor` back as `cursor`; `null` on the last page.
 `MeetingDetail { meeting: MeetingSummary, speakers: Speaker[], segments: Segment[], hasAudio, report: Report | null, actionItems: ActionItem[], scores: Score[] }`: speakers "Me" first; segments of both tracks in time order; `hasAudio` false once retention deleted the audio; `report` null until analyzed or when nobody was heard; `scores` holds the headline scores only, in the order engagement, value, my_performance, productivity, and is empty when there was too little data to score (ADR-025).
+`Highlight { id, meetingId, atMs, note: string | null }` (`atMs` is recorded time from the meeting start). `MeetingDetail.highlights` lists the meeting's highlights in time order.
 `Report { summary, keyPoints: string[], decisions: { text, segmentId }[], openQuestions: string[], suggestions: { text, scoreKind, segmentId }[], chapters: { title, startMs }[], modelUsed, costUsd: number | null, createdAt }`. `ActionItem { id, task, ownerLabel: string | null, dueDate: string | null, done, segmentId: string | null }` (`ownerLabel` "Me" is the user; `dueDate` YYYY-MM-DD). `Score { kind, value, evidence: { metrics: Record<string, number>, parts: { name, weight, score }[], segmentIds: string[], rationale } }`. Every `segmentId` is a segment of the meeting.
 `Speaker { id, label, isMe }`. `Segment { id, track: "mic" | "sys", speakerId: string | null, startMs, endMs, text }` (ms from the meeting start; `speakerId` null when the provider could not tell who spoke).
 `RecordingState { meetingId: string | null, state: "idle" | "recording" | "paused" | "stopped", elapsedMs, error: string | null }`: `idle` = nothing recorded since launch; `elapsedMs` counts recorded time only (paused time excluded); `error` explains a recording that stopped by itself.
@@ -51,6 +52,7 @@ Names here are the contract between UI, core, sidecar and providers. Changing on
 | `recording:state` | `RecordingState` |
 | `recording:levels` | `{ micDb, sysDb }` (≤10 Hz), dBFS from -90 to 0; `null` when that device sent no audio in the last 100 ms |
 | `caption:segment` | `Segment` (live captions, FR-3.5) |
+| `highlight:added` | `Highlight`: a highlight was added from the window, the tray or `--highlight` (FR-9.1) |
 | `job:progress` | `{ meetingId, step, status: "queued" \| "running" \| "done" \| "failed", attempt, error? }`: `running` when an attempt starts (attempt from 1), `done` when it succeeds, `queued` with `error` when a retry is scheduled or, for a missing API key, when the step waits until a key is saved (`set_api_key` resumes it, ADR-021), `failed` with `error` when the step gave up and the meeting is `failed`. `error` is readable text, absent when there is none (NFR-7) |
 | `meeting:ready` | `{ meetingId }` |
 

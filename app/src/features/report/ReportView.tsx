@@ -2,7 +2,15 @@ import { useId, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { formatElapsed } from "@/features/recording/format";
 import { SCORE_KINDS, type MeetingDetail, type Score } from "@/lib/ipc";
-import { formatDate, ownerName, PART_LABELS, partDetail, SCORE_LABELS } from "./labels";
+import {
+  formatCost,
+  formatDate,
+  lineAt,
+  ownerName,
+  PART_LABELS,
+  partDetail,
+  SCORE_LABELS,
+} from "./labels";
 
 /**
  * FR-4.3, FR-5.5: summary, decisions, action items, the four scores with why, and
@@ -41,6 +49,22 @@ export function ReportView({
     <div className="flex flex-col gap-6">
       <Section title="Summary">
         <p className="text-sm whitespace-pre-line">{report.summary}</p>
+      </Section>
+
+      <Section title="Highlights" items={detail.highlights}>
+        <ul className="flex flex-col gap-1 text-sm">
+          {detail.highlights.map((h) => {
+            const near = lineAt(detail.segments, h.atMs);
+            return (
+              <li key={h.id} className="flex flex-wrap items-baseline gap-x-2">
+                <span className="text-muted-foreground tabular-nums">{formatElapsed(h.atMs)}</span>
+                <span>{h.note ?? "Marked moment"}</span>
+                {near && <span className="text-muted-foreground">{near.text}</span>}
+                {near && line(near.id)}
+              </li>
+            );
+          })}
+        </ul>
       </Section>
 
       <Section title="Scores">
@@ -131,6 +155,12 @@ export function ReportView({
           ))}
         </ol>
       </Section>
+
+      {report.costUsd !== null && (
+        <p className="text-xs text-muted-foreground">
+          Estimated AI cost {formatCost(report.costUsd)}, analyzed with {report.modelUsed}
+        </p>
+      )}
     </div>
   );
 }

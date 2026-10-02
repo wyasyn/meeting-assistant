@@ -149,6 +149,25 @@ export function listAudioDevices() {
   return call<AudioDevice[]>("list_audio_devices");
 }
 
+/** Mirrors Rust `store::highlights::Highlight`; also the `highlight:added` payload (FR-9.1). */
+export interface Highlight {
+  id: string;
+  meetingId: string;
+  /** Recorded time when it was marked, ms from the meeting start. */
+  atMs: number;
+  note: string | null;
+}
+
+/** FR-9.1: marks the current moment of the running or paused recording. */
+export function addHighlight(note?: string) {
+  return call<Highlight>("add_highlight", note === undefined ? {} : { note });
+}
+
+/** A highlight was added, from the window, the tray or `--highlight`. */
+export function onHighlightAdded(handler: (highlight: Highlight) => void) {
+  return on<Highlight>("highlight:added", handler);
+}
+
 export function onRecordingState(handler: (state: RecordingState) => void) {
   return on<RecordingState>("recording:state", handler);
 }
@@ -384,6 +403,8 @@ export interface MeetingDetail {
   actionItems: ActionItem[];
   /** Headline scores; empty when there was too little data to score. */
   scores: Score[];
+  /** Moments the user marked while recording, in time order (FR-9.1). */
+  highlights: Highlight[];
 }
 
 /** Mirrors Rust `store::reports::ScoreValue`: a headline score without its evidence. */

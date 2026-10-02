@@ -2,12 +2,15 @@ import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  addHighlight,
   AppError,
   getRecordingState,
   listAudioDevices,
+  onHighlightAdded,
   pauseRecording,
   startRecording,
   stopRecording,
+  type Highlight,
   type RecordingState,
 } from "@/lib/ipc";
 import { RecordingControls } from "./RecordingControls";
@@ -15,8 +18,10 @@ import { useRecordingStore } from "./store";
 
 vi.mock("@/lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/ipc")>()),
+  addHighlight: vi.fn(),
   getRecordingState: vi.fn(),
   listAudioDevices: vi.fn(),
+  onHighlightAdded: vi.fn(),
   pauseRecording: vi.fn(),
   resumeRecording: vi.fn(),
   startRecording: vi.fn(),
@@ -42,6 +47,7 @@ beforeEach(() => {
     { id: "mic", name: "Built-in mic", kind: "input", isDefault: true },
     { id: "spk", name: "Speakers", kind: "output", isDefault: true },
   ]);
+  vi.mocked(onHighlightAdded).mockResolvedValue(() => undefined);
   setPhase(state("idle"));
 });
 
@@ -100,5 +106,33 @@ describe("RecordingControls (FR-1.4)", () => {
     render(<RecordingControls />);
     expect(await screen.findByText("Built-in mic")).toBeInTheDocument();
     expect(screen.getByText("Speakers")).toBeInTheDocument();
+  });
+
+  it("adds a highlight and confirms it from the event (FR-9.1)", async () => {
+    let added: ((h: Highlight) => void) | undefined;
+    vi.mocked(onHighlightAdded).mockImplementation((handler) => {
+      added = handler;
+      return Promise.resolve(() => undefined);
+    });
+    const mark = (atMs: number): Highlight => ({ id: "h", meetingId: "m1", atMs, note: null });
+    vi.mocked(addHighlight).mockImplementation(() => {
+      const h = mark(65_000);
+      added?.(h);
+      return Promise.resolve(h);
+    });
+    setPhase(state("recording"));
+    render(<RecordingControls />);
+    await userEvent.click(screen.getByRole("button", { name: "Add highlight" }));
+    expect(addHighlight).toHaveBeenCalledWith();
+    expect(await screen.findByRole("status")).toHaveTextContent("Highlight added at 1:05");
+
+    // One from the tray or the command line counts too.
+    act(() => {
+      added?.(mark(90_000));
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("Highlight added at 1:30 (2 so far)");
+
+    setPhase(state("stopped"));
+    expect(screen.queryByRole("status")).toBeNull();
   });
 });

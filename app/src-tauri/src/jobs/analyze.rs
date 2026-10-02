@@ -1,6 +1,6 @@
 //! Pipeline steps 2.2 and 2.3 (ADR-024, ADR-025): store the deterministic metrics, then ask
 //! the LLM for the report and save it with the action items and the headline scores
-//! (FR-4.1, FR-4.2, FR-5.1 to FR-5.4, rule 5, rule 6).
+//! (FR-4.1, FR-4.2, FR-5.1 to FR-5.4, FR-8.4, FR-9.1, rule 5, rule 6).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -11,7 +11,8 @@ use super::StepRunner;
 use crate::error::AppError;
 use crate::metrics::{self, scoring, Metrics, Timing};
 use crate::providers::analysis::{AnalysisJson, Judged};
-use crate::providers::{AnalyzeRequest, ProviderId, ProviderService};
+use crate::providers::{AnalyzeRequest, Provider, ProviderId, ProviderService};
+use crate::store::highlights::{Highlight, HighlightRepo};
 use crate::store::meetings::{AnalysisInfo, MeetingRepo};
 use crate::store::reports::{NewActionItem, NewReport, NewScore, ReportRepo};
 use crate::store::segments::{Segment, SegmentRepo, Speaker, ME_LABEL};
@@ -61,10 +62,15 @@ pub struct AnalyzeStep {
 impl StepRunner for AnalyzeStep {
     fn run(&self, meeting_id: &str) -> Result<(), AppError> {
         let info = info(&self.store, meeting_id)?;
-        let (segments, speakers) = {
+        let (segments, speakers, highlights) = {
             let conn = self.store.conn()?;
             let repo = SegmentRepo::new(&conn);
-            (repo.list(meeting_id)?, repo.speakers(meeting_id)?)
+            let highlights = HighlightRepo::new(&conn).list(meeting_id)?;
+            (
+                repo.list(meeting_id)?,
+                repo.speakers(meeting_id)?,
+                highlights,
+            )
         };
         if segments.is_empty() {
             tracing::info!("nothing was said, so there is nothing to analyze");
@@ -75,9 +81,10 @@ impl StepRunner for AnalyzeStep {
             transcript: transcript(&segments, &speakers),
             metrics: prompt_metrics(&metrics, &speakers, &info),
             template: info.template.clone(),
-            highlights: Vec::new(),
+            highlights: highlights.iter().map(highlight_line).collect(),
         };
         let provider = self.providers.get(ProviderId::Gemini)?;
+        let cost = estimate_cost(provider.as_ref(), &info, &request.transcript);
         // Runs on the jobs thread, outside the async runtime (ADR-019).
         let mut analysis = tauri::async_runtime::block_on(provider.analyze(request))?;
         let ids: HashMap<String, &str> = segments
@@ -87,13 +94,30 @@ impl StepRunner for AnalyzeStep {
             .collect();
         analysis.resolve_segments(|r| ids.get(r).map(|id| (*id).to_owned()))?;
 
-        let (report, actions, scores) =
+        let (mut report, actions, scores) =
             to_rows(analysis, provider.analysis_model(), &info, &metrics);
+        report.cost_usd = Some(cost);
         ReportRepo::new(&*self.store.conn()?)
             .save_analysis(meeting_id, &report, &actions, &scores)?;
         tracing::info!(actions = actions.len(), "meeting analyzed");
         Ok(())
     }
+}
+
+/// `[mm:ss] note` for the prompt.
+fn highlight_line(h: &Highlight) -> String {
+    match &h.note {
+        Some(note) => format!("[{}] {}", clock(h.at_ms), note.replace('\n', " ")),
+        None => format!("[{}]", clock(h.at_ms)),
+    }
+}
+
+/// FR-8.4: what this meeting cost at list prices. Both tracks were transcribed, so the
+/// audio is counted twice; a token is about 4 characters of transcript (ADR-029).
+fn estimate_cost(provider: &dyn Provider, info: &AnalysisInfo, transcript: &str) -> f64 {
+    let audio_s = u32::try_from(info.duration_s.unwrap_or(0).max(0) * 2).unwrap_or(u32::MAX);
+    let tokens = u32::try_from(transcript.chars().count() / 4).unwrap_or(u32::MAX);
+    (provider.estimate_cost(audio_s, tokens) * 10_000.0).round() / 10_000.0
 }
 
 fn line_ref(index: usize) -> String {
@@ -344,8 +368,9 @@ mod tests {
         async fn embed(&self, _: &[String]) -> Result<Vec<Vec<f32>>, ProviderError> {
             Ok(Vec::new())
         }
-        fn estimate_cost(&self, _: u32, _: u32) -> f64 {
-            0.0
+        /// One dollar per hour of audio plus a cent per 100 tokens, to check the inputs.
+        fn estimate_cost(&self, audio_seconds: u32, transcript_tokens: u32) -> f64 {
+            f64::from(audio_seconds) / 3600.0 + f64::from(transcript_tokens) / 10_000.0
         }
     }
 
@@ -470,6 +495,36 @@ mod tests {
         assert_eq!(seen[0].metrics["duration_min"], json!(10.0));
         assert_eq!(seen[0].metrics["talk_share"]["Me"], json!(0.33));
         assert_eq!(seen[0].metrics["questions_total"], json!(1.0));
+    }
+
+    #[test]
+    fn fr_9_1_highlights_reach_the_prompt_and_fr_8_4_cost_is_saved() {
+        let h = Harness::new();
+        {
+            let conn = h.store.conn().unwrap();
+            let repo = HighlightRepo::new(&conn);
+            repo.add(&h.meeting_id, 65_000, Some("pricing\nagain"))
+                .unwrap();
+            repo.add(&h.meeting_id, 5_000, None).unwrap();
+        }
+        h.analyze(sample()).unwrap();
+        let seen = h.seen.lock().unwrap();
+        assert_eq!(seen[0].highlights, ["[00:05]", "[01:05] pricing again"]);
+        let tokens = seen[0].transcript.chars().count() / 4;
+        drop(seen);
+        let cost: f64 = h
+            .store
+            .conn()
+            .unwrap()
+            .query_row(
+                "SELECT cost_usd FROM reports WHERE meeting_id = ?1",
+                [&h.meeting_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        // 600 s on two tracks is 1200 s of audio.
+        let want = 1200.0 / 3600.0 + tokens as f64 / 10_000.0;
+        assert!((cost - (want * 10_000.0).round() / 10_000.0).abs() < 1e-9);
     }
 
     #[test]

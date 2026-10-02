@@ -22,6 +22,8 @@ describe("toMarkdown (FR-7.1)", () => {
       "## Open questions\n\n- Who writes the notes?\n",
       "- Ask Ann for her view earlier (Engagement) (at 0:01)\n",
       "## Chapters\n\n- 0:00 Release date\n",
+      '## Highlights\n\n- 2:06 Release date: "Friday works."\n',
+      "\n_Estimated AI cost $0.04, analyzed with gemini-3.8-flash._\n",
       "## Transcript\n\n**0:01 Ann:** Can we ship on Friday?\n\n**2:05 Me:** Friday works.\n",
     ]) {
       expect(md).toContain(part);

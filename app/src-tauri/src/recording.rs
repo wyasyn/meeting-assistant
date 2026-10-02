@@ -13,6 +13,7 @@ use crate::capture::{AudioBackend, CaptureConfig, CaptureError};
 use crate::detector::apps::SourceApp;
 use crate::detector::ActiveRecording;
 use crate::error::AppError;
+use crate::store::highlights::{Highlight, HighlightRepo};
 use crate::store::meetings::{MeetingRepo, MeetingStatus, OpenRecording};
 use crate::store::{now_ms, Store};
 
@@ -24,6 +25,7 @@ pub const SILENCE_AFTER: Duration = Duration::from_secs(120);
 const LEVEL_GAP: Duration = Duration::from_secs(1);
 const DEFAULT_TITLE: &str = "Recording";
 const DEFAULT_SOURCE_APP: &str = "other";
+const MAX_NOTE_CHARS: usize = 500;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -76,6 +78,8 @@ pub trait RecordingEvents: Send + Sync {
     fn levels(&self, levels: Levels);
     /// Both tracks were quiet for `SILENCE_AFTER` (FR-1.6). Called on the recorder thread.
     fn silent(&self, meeting_id: &str);
+    /// The user marked a moment (FR-9.1).
+    fn highlight(&self, _highlight: &Highlight) {}
 }
 
 /// Spots `SILENCE_AFTER` of quiet on both tracks; reports once per quiet stretch.
@@ -192,6 +196,29 @@ impl RecordingService {
             meeting_id: active.meeting.id.clone(),
             source_app: active.source_app,
         })
+    }
+
+    /// Marks the current moment of the recording, running or paused (FR-9.1). From the
+    /// window, the tray or `--highlight` on the command line (ADR-029).
+    pub fn add_highlight(&self, note: Option<&str>) -> Result<Highlight, AppError> {
+        let note = note.map(str::trim).filter(|n| !n.is_empty());
+        if note.is_some_and(|n| n.chars().count() > MAX_NOTE_CHARS) {
+            return Err(AppError::InvalidState(format!(
+                "Use a note of {MAX_NOTE_CHARS} characters or fewer."
+            )));
+        }
+        let (meeting_id, at_ms) = {
+            let inner = self.lock()?;
+            let active = inner.active.as_ref().ok_or_else(|| {
+                AppError::InvalidState("Highlights can be added while recording.".into())
+            })?;
+            let at_ms = i64::try_from(duration_ms(active.elapsed())).unwrap_or(i64::MAX);
+            (active.meeting.id.clone(), at_ms)
+        };
+        let highlight = HighlightRepo::new(&*self.0.store.conn()?).add(&meeting_id, at_ms, note)?;
+        tracing::info!("highlight added");
+        self.0.events.highlight(&highlight);
+        Ok(highlight)
     }
 
     pub fn start(
@@ -442,6 +469,7 @@ mod tests {
     #[derive(Default)]
     struct FakeEvents {
         states: Mutex<Vec<RecordingState>>,
+        highlights: Mutex<Vec<Highlight>>,
     }
 
     impl FakeEvents {
@@ -464,6 +492,9 @@ mod tests {
         }
         fn levels(&self, _levels: Levels) {}
         fn silent(&self, _meeting_id: &str) {}
+        fn highlight(&self, highlight: &Highlight) {
+            self.highlights.lock().unwrap().push(highlight.clone());
+        }
     }
 
     fn service(backend: FakeBackend, dir: &TempDir) -> (RecordingService, Arc<FakeEvents>) {
@@ -534,6 +565,41 @@ mod tests {
             .join("mic")
             .join("000001.opus.enc")
             .exists());
+    }
+
+    #[test]
+    fn fr_9_1_highlights_mark_the_recording_while_it_runs_or_pauses() {
+        let dir = TempDir::new("service-highlight");
+        let (service, events) = service(live(), &dir);
+        let idle = service.add_highlight(None).unwrap_err();
+        assert_eq!(idle.code(), "invalid_state");
+
+        let meeting = service.start(None, None).unwrap();
+        let first = service.add_highlight(Some("  pricing ")).unwrap();
+        assert_eq!(
+            (first.meeting_id.as_str(), first.note.as_deref()),
+            (meeting.id.as_str(), Some("pricing"))
+        );
+        service.pause().unwrap();
+        let paused = service.add_highlight(Some("  ")).unwrap();
+        assert_eq!(paused.note, None);
+        assert!(paused.at_ms >= first.at_ms);
+        let long = "x".repeat(501);
+        assert_eq!(
+            service.add_highlight(Some(&long)).unwrap_err().code(),
+            "invalid_state"
+        );
+        service.stop().unwrap();
+        assert_eq!(
+            service.add_highlight(None).unwrap_err().code(),
+            "invalid_state"
+        );
+
+        assert_eq!(*events.highlights.lock().unwrap(), [first, paused]);
+        let saved = HighlightRepo::new(&service.0.store.conn().unwrap())
+            .list(&meeting.id)
+            .unwrap();
+        assert_eq!(saved.len(), 2);
     }
 
     #[test]

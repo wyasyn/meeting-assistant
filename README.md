@@ -29,6 +29,13 @@ cd sidecar && uv sync && uv run uvicorn app.main:app --port 8765
 curl http://127.0.0.1:8765/health
 ```
 
+## Highlight shortcut
+
+Global hotkeys do not work on Wayland, so the app takes a command instead: while recording,
+`meeting-assistant --highlight` marks the current moment of the running app. Bind it to a key
+in your desktop's keyboard settings (GNOME: Settings, Keyboard, Custom Shortcuts). The tray menu
+and the window have an "Add highlight" button too.
+
 ## Layout
 - `app/`: Tauri 2 app. React UI in `app/src/`, Rust core in `app/src-tauri/`.
 - `sidecar/`: Python FastAPI service for local speech-to-text and diarization.

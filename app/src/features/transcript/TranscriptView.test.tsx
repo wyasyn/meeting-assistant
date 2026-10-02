@@ -43,6 +43,7 @@ function detail(over: Partial<MeetingDetail> = {}): MeetingDetail {
     report: null,
     actionItems: [],
     scores: [],
+    highlights: [],
     ...over,
   };
 }

@@ -15,6 +15,7 @@ const TRAY_ID: &str = "main";
 const MENU_OPEN: &str = "open";
 const MENU_RECORD: &str = "record";
 const MENU_PAUSE: &str = "pause";
+const MENU_HIGHLIGHT: &str = "highlight";
 const MENU_QUIT: &str = "quit";
 
 const RED: [u8; 4] = [220, 38, 38, 255];
@@ -24,6 +25,7 @@ const GREY: [u8; 4] = [140, 140, 140, 255];
 struct TrayItems<R: Runtime> {
     record: MenuItem<R>,
     pause: MenuItem<R>,
+    highlight: MenuItem<R>,
 }
 
 pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
@@ -32,9 +34,12 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let pause = MenuItemBuilder::with_id(MENU_PAUSE, "Pause")
         .enabled(false)
         .build(app)?;
+    let highlight = MenuItemBuilder::with_id(MENU_HIGHLIGHT, "Add highlight")
+        .enabled(false)
+        .build(app)?;
     let quit = MenuItemBuilder::with_id(MENU_QUIT, "Quit").build(app)?;
     let menu = MenuBuilder::new(app)
-        .items(&[&open, &record, &pause])
+        .items(&[&open, &record, &pause, &highlight])
         .separator()
         .item(&quit)
         .build()?;
@@ -45,6 +50,7 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
             MENU_OPEN => show_main_window(app),
             MENU_RECORD => off_main_thread(app, toggle_recording),
             MENU_PAUSE => off_main_thread(app, toggle_pause),
+            MENU_HIGHLIGHT => off_main_thread(app, add_highlight),
             MENU_QUIT => app.exit(0),
             _ => {}
         });
@@ -55,7 +61,11 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         tray = tray.tooltip(name);
     }
     tray.build(app)?;
-    app.manage(TrayItems { record, pause });
+    app.manage(TrayItems {
+        record,
+        pause,
+        highlight,
+    });
     Ok(())
 }
 
@@ -78,6 +88,18 @@ fn toggle_recording<R: Runtime>(app: &AppHandle<R>) {
     if let Err(err) = result {
         tracing::warn!(%err, "tray recording action failed");
         show_main_window(app);
+    }
+}
+
+/// FR-9.1: from the tray menu, or `--highlight` on the command line (a desktop shortcut can
+/// run it, since global hotkeys do not work on Wayland, ADR-029). Nothing to mark when not
+/// recording, so that is only logged.
+pub fn add_highlight<R: Runtime>(app: &AppHandle<R>) {
+    let Some(service) = app.try_state::<RecordingService>() else {
+        return;
+    };
+    if let Err(err) = service.add_highlight(None) {
+        tracing::info!(%err, "highlight not added");
     }
 }
 
@@ -115,7 +137,8 @@ pub fn show_recording_state<R: Runtime>(app: &AppHandle<R>, phase: Phase) {
             .record
             .set_text(record_text)
             .and_then(|()| items.pause.set_text(pause_text))
-            .and_then(|()| items.pause.set_enabled(pause_enabled));
+            .and_then(|()| items.pause.set_enabled(pause_enabled))
+            .and_then(|()| items.highlight.set_enabled(pause_enabled));
         if let Err(err) = updated {
             tracing::warn!(%err, "could not update the tray menu");
         }

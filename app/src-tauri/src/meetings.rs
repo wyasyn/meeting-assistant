@@ -12,6 +12,7 @@ use crate::capture::recorder::RecordingTarget;
 use crate::capture::Track;
 use crate::error::AppError;
 use crate::recording::MeetingSummary;
+use crate::store::highlights::{Highlight, HighlightRepo};
 use crate::store::meetings::{MeetingRepo, MeetingRow};
 use crate::store::reports::{ActionItem, Report, ReportRepo, Score, ScoreValue};
 use crate::store::segments::{Segment, SegmentRepo, Speaker};
@@ -71,6 +72,8 @@ pub struct MeetingDetail {
     pub action_items: Vec<ActionItem>,
     /// Headline scores; empty when there was too little data to score.
     pub scores: Vec<Score>,
+    /// Moments the user marked while recording, in time order (FR-9.1).
+    pub highlights: Vec<Highlight>,
 }
 
 #[derive(Clone)]
@@ -134,6 +137,7 @@ impl MeetingService {
             report: reports.get(id)?,
             action_items: reports.action_items(id)?,
             scores: reports.headline_scores(id)?,
+            highlights: HighlightRepo::new(&conn).list(id)?,
         })
     }
 
@@ -343,6 +347,7 @@ mod tests {
         assert_eq!(labels, [("Me", true), ("Speaker 1", false)]);
         assert_eq!(detail.report, None);
         assert!(detail.action_items.is_empty() && detail.scores.is_empty());
+        assert!(detail.highlights.is_empty());
 
         let other = &detail.speakers[1];
         let renamed = h.service.rename_speaker(&other.id, "  Ann ").unwrap();

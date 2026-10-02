@@ -27,6 +27,7 @@ vi.mock("@/lib/ipc", async (importOriginal) => ({
   listProviders: vi.fn(() => Promise.resolve([])),
   listMeetings: vi.fn(() => Promise.resolve({ items: [], nextCursor: null })),
   onJobProgress: vi.fn(() => Promise.resolve(() => undefined)),
+  onHighlightAdded: vi.fn(() => Promise.resolve(() => undefined)),
 }));
 
 describe("App", () => {

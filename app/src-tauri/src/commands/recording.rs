@@ -11,10 +11,12 @@ use crate::detector::MeetingEnded;
 use crate::error::AppError;
 use crate::jobs::JobService;
 use crate::recording::{MeetingSummary, Phase, RecordingEvents, RecordingService, RecordingState};
+use crate::store::highlights::Highlight;
 use crate::tray;
 
 pub const STATE_EVENT: &str = "recording:state";
 pub const LEVELS_EVENT: &str = "recording:levels";
+pub const HIGHLIGHT_EVENT: &str = "highlight:added";
 
 /// Sends state changes to the window, the tray and consent, and levels to the window.
 pub struct TauriEvents<R: Runtime>(pub AppHandle<R>);
@@ -44,6 +46,10 @@ impl<R: Runtime> RecordingEvents for TauriEvents<R> {
 
     fn levels(&self, levels: Levels) {
         self.emit(LEVELS_EVENT, levels);
+    }
+
+    fn highlight(&self, highlight: &Highlight) {
+        self.emit(HIGHLIGHT_EVENT, highlight.clone());
     }
 
     fn silent(&self, meeting_id: &str) {
@@ -81,6 +87,15 @@ pub async fn start_recording(
     source_app: Option<String>,
 ) -> Result<MeetingSummary, AppError> {
     blocking(&service, move |s| s.start(title, source_app)).await
+}
+
+/// FR-9.1: marks the current moment of the recording.
+#[tauri::command]
+pub async fn add_highlight(
+    service: State<'_, RecordingService>,
+    note: Option<String>,
+) -> Result<Highlight, AppError> {
+    blocking(&service, move |s| s.add_highlight(note.as_deref())).await
 }
 
 #[tauri::command]

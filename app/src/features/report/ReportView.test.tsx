@@ -2,7 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { reportDetail } from "./fixtures";
-import { formatDate, partDetail } from "./labels";
+import { formatCost, formatDate, lineAt, partDetail } from "./labels";
 import { ReportView } from "./ReportView";
 
 function fail(): never {
@@ -70,6 +70,20 @@ describe("ReportView (FR-4.3, FR-5.5)", () => {
     expect(onShowLine).toHaveBeenLastCalledWith("b");
   });
 
+  it("pins highlights with their line and shows the cost (FR-9.1, FR-8.4)", async () => {
+    const onShowLine = vi.fn();
+    render(<ReportView detail={reportDetail()} onShowLine={onShowLine} />);
+    const highlights = within(section("Highlights")).getAllByRole("listitem");
+    expect(highlights[0]).toHaveTextContent("2:06Release dateFriday works.");
+    await userEvent.click(
+      within(section("Highlights")).getByRole("button", { name: /line at 2:05/ }),
+    );
+    expect(onShowLine).toHaveBeenCalledWith("b");
+    expect(
+      screen.getByText("Estimated AI cost $0.04, analyzed with gemini-3.8-flash"),
+    ).toBeInTheDocument();
+  });
+
   it("says when there was too little data to score", () => {
     render(<ReportView detail={reportDetail({ scores: [] })} onShowLine={vi.fn()} />);
     expect(within(section("Scores")).getByText(/Not enough to score/)).toBeInTheDocument();
@@ -92,6 +106,16 @@ describe("ReportView (FR-4.3, FR-5.5)", () => {
 });
 
 describe("labels", () => {
+  it("formats costs and finds the line a moment falls in", () => {
+    expect(formatCost(0.004)).toBe("under $0.01");
+    expect(formatCost(0.256)).toBe("$0.26");
+    const lines = [{ startMs: 1_000 }, { startMs: 5_000 }];
+    expect(lineAt(lines, 6_000)).toBe(lines[1]);
+    expect(lineAt(lines, 5_000)).toBe(lines[1]);
+    expect(lineAt(lines, 0)).toBe(lines[0]);
+    expect(lineAt<{ startMs: number }>([], 0)).toBeUndefined();
+  });
+
   it("describes the metric behind each part", () => {
     expect(partDetail("llm", {})).toBeNull();
     expect(partDetail("wpm", { my_wpm: 151.6 })).toBe("152 words a minute");
