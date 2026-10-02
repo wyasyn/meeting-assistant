@@ -21,7 +21,7 @@ Names here are the contract between UI, core, sidecar and providers. Changing on
 | `delete_meetings` | `{ ids?: string[], all?: boolean }` | `number` | NFR-15 |
 | `get_settings` / `set_settings` | none / `{ settings: Settings }` | `Settings` | FR-8.3, FR-8.5 |
 | `list_providers` | none | `ProviderEntry[]` | FR-8.1 |
-| `set_api_key` / `clear_api_key` | `{ provider, key }` / `{ provider }` | `void` (stored in / removed from the keychain; the key is trimmed, blank is `invalid_state`) | FR-8.1 |
+| `set_api_key` / `clear_api_key` | `{ provider, key }` / `{ provider }` | `void` (stored in / removed from the keychain; the key is trimmed, blank is `invalid_state`; saving also resumes meetings waiting for a key) | FR-8.1 |
 | `test_provider` | `{ provider }` | `TestResult` (a refused or unreachable key is `ok: false`; only keychain failures are errors) | FR-8.1 |
 | `list_audio_devices` | — | `AudioDevice[]` | FR-2.3 |
 | `set_app_rule` | `{ sourceApp, rule: "ask" \| "always" \| "never" }` | `void` (`never` also closes that app's open prompt) | FR-1.7 |
@@ -45,7 +45,7 @@ Names here are the contract between UI, core, sidecar and providers. Changing on
 | `recording:state` | `RecordingState` |
 | `recording:levels` | `{ micDb, sysDb }` (≤10 Hz), dBFS from -90 to 0; `null` when that device sent no audio in the last 100 ms |
 | `caption:segment` | `Segment` (live captions, FR-3.5) |
-| `job:progress` | `{ meetingId, step, status: "queued" \| "running" \| "done" \| "failed", attempt, error? }`: `running` when an attempt starts (attempt from 1), `done` when it succeeds, `queued` with `error` when a retry is scheduled, `failed` with `error` when the step gave up and the meeting is `failed`. `error` is readable text, absent when there is none (NFR-7) |
+| `job:progress` | `{ meetingId, step, status: "queued" \| "running" \| "done" \| "failed", attempt, error? }`: `running` when an attempt starts (attempt from 1), `done` when it succeeds, `queued` with `error` when a retry is scheduled or, for a missing API key, when the step waits until a key is saved (`set_api_key` resumes it, ADR-021), `failed` with `error` when the step gave up and the meeting is `failed`. `error` is readable text, absent when there is none (NFR-7) |
 | `meeting:ready` | `{ meetingId }` |
 
 ## Errors
@@ -64,8 +64,8 @@ pub trait Provider: Send + Sync {
     fn estimate_cost(&self, audio_seconds: u32, transcript_tokens: u32) -> f64;
 }
 ```
-`TranscribeRequest { chunks: [{ path, start_ms }], language?, diarize: bool, vocabulary }`: `chunks` are decrypted temporary Ogg Opus chunk files in time order with their start in the meeting (chunk format in `05-data-model.md`), deleted by the caller after the call → `TranscribeResult { segments: [{start_ms, end_ms, text, speaker_label?}] }`, times in ms from the meeting start. Word timings are not returned yet.
-`ProviderError`: `Unavailable` → `provider_unavailable` (retryable), `Rejected` and `Unsupported` → `provider_rejected`, `InvalidOutput` → `invalid_llm_output` (retryable), a chunk that cannot be read → `storage`. Messages are readable and never hold keys, transcript text or paths.
+`TranscribeRequest { chunks: [{ ogg, start_ms }], language?, diarize: bool, vocabulary }`: `chunks` are decrypted Ogg Opus chunks held in memory only, never written to disk (ADR-021), in time order with their start in the meeting (chunk format in `05-data-model.md`) → `TranscribeResult { segments: [{start_ms, end_ms, text, speaker_label?}] }`, times in ms from the meeting start. A `speaker_label` never stands for two voices; one voice may get two labels when a long meeting is sent in batches. Word timings are not returned yet.
+`ProviderError`: `Unavailable` → `provider_unavailable` (retryable), `Rejected` and `Unsupported` → `provider_rejected`, `InvalidOutput` → `invalid_llm_output` (retryable). Messages are readable and never hold keys, transcript text or paths.
 Gemini (ADR-020): `gemini-3.5-flash-lite` transcribes, `gemini-3.8-flash` analyzes; REST `generateContent` with the key in the `x-goog-api-key` header, JSON output constrained by `responseSchema`. `embed` is `Unsupported` for now.
 
 ## Sidecar HTTP (core → sidecar, 127.0.0.1, `Authorization: Bearer <token>`)

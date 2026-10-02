@@ -1,6 +1,5 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
-use std::path::PathBuf;
 use std::thread::JoinHandle;
 
 use super::*;
@@ -77,30 +76,14 @@ fn answer(text: &str) -> String {
     .to_string()
 }
 
-struct Chunks(PathBuf);
-
-impl Chunks {
-    fn new(name: &str, count: usize) -> (Self, Vec<AudioChunk>) {
-        let dir = std::env::temp_dir().join(format!("ma-gemini-{name}-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let chunks = (0..count)
-            .map(|i| {
-                let path = dir.join(format!("{i}.ogg"));
-                std::fs::write(&path, format!("ogg{i}")).unwrap();
-                AudioChunk {
-                    path,
-                    start_ms: i as i64 * 10_000,
-                }
-            })
-            .collect();
-        (Self(dir), chunks)
-    }
-}
-
-impl Drop for Chunks {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
+/// In-memory chunks, 10 s apart, whose bytes are `ogg<i>`.
+fn chunks(count: usize) -> Vec<AudioChunk> {
+    (0..count)
+        .map(|i| AudioChunk {
+            ogg: format!("ogg{i}").into_bytes(),
+            start_ms: i as i64 * 10_000,
+        })
+        .collect()
 }
 
 fn request(chunks: Vec<AudioChunk>, diarize: bool) -> TranscribeRequest {
@@ -166,7 +149,7 @@ fn an_unreachable_server_is_unavailable() {
 
 #[test]
 fn fr_3_1_transcribe_sends_each_chunk_and_maps_times_to_the_meeting() {
-    let (_dir, chunks) = Chunks::new("map", 3);
+    let chunks = chunks(3);
     let transcript = json!({ "segments": [
         { "chunk": 2, "start_s": 1.5, "end_s": 4.0, "speaker": "Speaker 2", "text": "Bye." },
         { "chunk": 0, "start_s": 0.25, "end_s": 12.0, "speaker": " Speaker 1 ", "text": " Hello all. " },
@@ -214,7 +197,7 @@ fn fr_3_1_transcribe_sends_each_chunk_and_maps_times_to_the_meeting() {
 
 #[test]
 fn fr_2_2_without_diarization_no_speaker_is_asked_or_kept() {
-    let (_dir, chunks) = Chunks::new("mic", 1);
+    let chunks = chunks(1);
     let transcript = json!({ "segments": [
         { "chunk": 0, "start_s": 0, "end_s": 1, "speaker": "Speaker 1", "text": "Hi" }
     ]});
@@ -230,10 +213,7 @@ fn fr_2_2_without_diarization_no_speaker_is_asked_or_kept() {
 
 #[test]
 fn rule_6_malformed_transcripts_are_rejected_whole() {
-    let chunks = vec![AudioChunk {
-        path: PathBuf::new(),
-        start_ms: 0,
-    }];
+    let chunks = chunks(1);
     let bad = [
         json!({ "segments": [{ "chunk": 1, "start_s": 0, "end_s": 1, "text": "Hi" }] }),
         json!({ "segments": [{ "chunk": 0, "start_s": -1, "end_s": 1, "text": "Hi" }] }),
@@ -253,14 +233,19 @@ fn long_meetings_are_sent_in_batches() {
     assert_eq!(batches(&[500, 1], 10, 100), [0..1, 1..2]);
     assert!(batches(&[], 10, 100).is_empty());
 
-    let (_dir, chunks) = Chunks::new("batch", BATCH_CHUNKS + 1);
-    let first = json!({ "segments": [{ "chunk": 0, "start_s": 0, "end_s": 1, "text": "A" }] });
-    let second = json!({ "segments": [{ "chunk": 0, "start_s": 0, "end_s": 1, "text": "B" }] });
+    let chunks = chunks(BATCH_CHUNKS + 1);
+    let first = json!({ "segments": [
+        { "chunk": 0, "start_s": 0, "end_s": 1, "speaker": "Speaker 1", "text": "A" },
+        { "chunk": 1, "start_s": 0, "end_s": 1, "speaker": "Speaker 2", "text": "B" },
+    ]});
+    let second = json!({ "segments": [
+        { "chunk": 0, "start_s": 0, "end_s": 1, "speaker": "Speaker 1", "text": "C" },
+    ]});
     let (base, server) = serve(vec![
         (200, answer(&first.to_string())),
         (200, answer(&second.to_string())),
     ]);
-    let result = run(provider(&base).transcribe(request(chunks, false))).unwrap();
+    let result = run(provider(&base).transcribe(request(chunks, true))).unwrap();
     let seen = server.join().unwrap();
     assert_eq!(
         seen[1].body["contents"][0]["parts"]
@@ -269,8 +254,48 @@ fn long_meetings_are_sent_in_batches() {
             .len(),
         3
     );
-    let starts: Vec<_> = result.segments.iter().map(|s| s.start_ms).collect();
-    assert_eq!(starts, [0, BATCH_CHUNKS as i64 * 10_000]);
+    let got: Vec<_> = result
+        .segments
+        .iter()
+        .map(|s| (s.start_ms, s.speaker_label.clone().unwrap()))
+        .collect();
+    // The second batch's "Speaker 1" may be anyone, so it gets a new number (ADR-021).
+    assert_eq!(
+        got,
+        [
+            (0, "Speaker 1".to_owned()),
+            (10_000, "Speaker 2".to_owned()),
+            (BATCH_CHUNKS as i64 * 10_000, "Speaker 3".to_owned()),
+        ]
+    );
+}
+
+#[test]
+fn fr_3_2_relabel_numbers_speakers_by_first_appearance() {
+    let seg = |label: Option<&str>| TranscriptSegment {
+        start_ms: 0,
+        end_ms: 0,
+        text: "x".into(),
+        speaker_label: label.map(Into::into),
+    };
+    let mut batch = vec![
+        seg(Some("Speaker 2")),
+        seg(None),
+        seg(Some("Speaker 1")),
+        seg(Some("Speaker 2")),
+    ];
+    assert_eq!(relabel(&mut batch, 3), 5);
+    let labels: Vec<_> = batch.iter().map(|s| s.speaker_label.as_deref()).collect();
+    assert_eq!(
+        labels,
+        [
+            Some("Speaker 4"),
+            None,
+            Some("Speaker 5"),
+            Some("Speaker 4")
+        ]
+    );
+    assert_eq!(relabel(&mut [], 5), 5);
 }
 
 #[test]

@@ -3,6 +3,8 @@
 //! queues the next. Retryable failures come back with backoff, others fail the meeting.
 //! Audio is never touched here, so a failed meeting can be processed again (FR-4.6).
 
+pub mod steps;
+
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -23,7 +25,7 @@ const IDLE_POLL: Duration = Duration::from_secs(30);
 
 /// Post-call steps, in pipeline order (docs/04 "Pipeline steps").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code, reason = "steps get runners from 1.9 on")]
+#[allow(dead_code, reason = "metrics to notify get runners in Phase 2")]
 pub enum Step {
     TranscribeMic,
     TranscribeSystem,
@@ -62,7 +64,6 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    #[cfg_attr(not(test), allow(dead_code, reason = "steps are added from 1.9 on"))]
     pub fn with(mut self, step: Step, runner: Box<dyn StepRunner>) -> Self {
         self.steps.push((step, runner));
         self
@@ -202,6 +203,14 @@ impl Queue {
                 drop(conn);
                 progress(JobStatus::Done, None);
             }
+            // Waits for the user to add a key, however long that takes (ADR-021).
+            Err(err @ AppError::NoApiKey(_)) => {
+                let message = err.to_string();
+                repo.park(&job.id, &message)?;
+                tracing::info!(step = job.step, "job waits for an api key");
+                drop(conn);
+                progress(JobStatus::Queued, Some(message));
+            }
             Err(err) if err.retryable() && attempt < MAX_ATTEMPTS => {
                 let message = err.to_string();
                 let wait = i64::try_from(backoff(attempt).as_millis()).unwrap_or(i64::MAX);
@@ -227,6 +236,20 @@ impl Queue {
         Ok(true)
     }
 
+    /// Runs parked jobs again, for example after an API key was saved.
+    fn release_parked(&self, now: i64) {
+        let released = self
+            .store
+            .conn()
+            .map_err(AppError::from)
+            .and_then(|conn| Ok(JobRepo::new(&conn).release_parked(now)?));
+        match released {
+            Ok(0) => {}
+            Ok(n) => tracing::info!(jobs = n, "parked jobs released"),
+            Err(err) => tracing::warn!(%err, "could not release parked jobs"),
+        }
+    }
+
     /// How long the worker may sleep.
     fn wait(&self, now: i64) -> Duration {
         let next = self
@@ -245,6 +268,8 @@ impl Queue {
 
 enum Signal {
     Wake,
+    /// Something parked jobs wait for may exist now.
+    Resume,
 }
 
 /// Runs the queue on its own thread. Managed as Tauri state.
@@ -269,6 +294,8 @@ impl JobService {
             pipeline,
             events,
         };
+        // A key may have been saved while jobs were parked; if not, they park again.
+        queue.release_parked(now_ms());
         let (tx, rx) = mpsc::channel();
         let spawned = std::thread::Builder::new()
             .name("jobs".into())
@@ -283,6 +310,7 @@ impl JobService {
                     queue.wait(now_ms())
                 };
                 match rx.recv_timeout(wait) {
+                    Ok(Signal::Resume) => queue.release_parked(now_ms()),
                     Ok(Signal::Wake) | Err(RecvTimeoutError::Timeout) => {}
                     Err(RecvTimeoutError::Disconnected) => return,
                 }
@@ -301,9 +329,18 @@ impl JobService {
 
     /// Looks at the queue now, for example after a recording was saved.
     pub fn wake(&self) {
-        if let Ok(signal) = self.signal.lock() {
-            if let Some(tx) = signal.as_ref() {
-                let _ = tx.send(Signal::Wake);
+        self.send(Signal::Wake);
+    }
+
+    /// Runs jobs parked for a missing API key again, after one was saved.
+    pub fn resume(&self) {
+        self.send(Signal::Resume);
+    }
+
+    fn send(&self, signal: Signal) {
+        if let Ok(tx) = self.signal.lock() {
+            if let Some(tx) = tx.as_ref() {
+                let _ = tx.send(signal);
             }
         }
     }
@@ -526,6 +563,35 @@ mod tests {
         assert_eq!(*h.log.lock().unwrap(), ["mic"]);
         let last = h.events.0.lock().unwrap().last().cloned().unwrap();
         assert_eq!(last.error.as_deref(), Some("Add an API key in settings."));
+    }
+
+    #[test]
+    fn nfr_7_a_missing_key_parks_the_job_until_resumed() {
+        let no_key = || AppError::NoApiKey("No Gemini API key is saved.".into());
+        let h = Harness::new(|log| {
+            Pipeline::default().with(
+                Step::TranscribeMic,
+                step(log, "mic", vec![no_key(), no_key()]),
+            )
+        });
+        assert_eq!(h.drain(i64::MAX), 1);
+        assert_eq!(h.status(), "processing");
+        let last = h.events.0.lock().unwrap().last().cloned().unwrap();
+        assert_eq!(
+            (last.status, last.error.as_deref()),
+            (ProgressStatus::Queued, Some("No Gemini API key is saved."))
+        );
+        assert_eq!(h.drain(i64::MAX), 0, "parked, not retried");
+        assert_eq!(h.queue.wait(0), IDLE_POLL);
+
+        // Still no key: it parks again and the attempt does not count.
+        h.queue.release_parked(10);
+        assert_eq!(h.drain(10), 1);
+        h.queue.release_parked(20);
+        assert_eq!(h.drain(20), 1);
+        let last = h.events.0.lock().unwrap().last().cloned().unwrap();
+        assert_eq!((last.status, last.attempt), (ProgressStatus::Done, 1));
+        assert_eq!(h.status(), "ready");
     }
 
     #[test]

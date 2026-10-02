@@ -122,12 +122,10 @@ impl GeminiProvider {
     ) -> Result<Vec<TranscriptSegment>, ProviderError> {
         let mut parts = vec![json!({ "text": transcribe_prompt(req) })];
         for (i, chunk) in chunks.iter().enumerate() {
-            // Blocking read: providers run on the jobs thread (ADR-019).
-            let audio = std::fs::read(&chunk.path)?;
             parts.push(json!({ "text": format!("Chunk {i}") }));
             parts.push(json!({ "inlineData": {
                 "mimeType": "audio/ogg",
-                "data": base64::engine::general_purpose::STANDARD.encode(audio),
+                "data": base64::engine::general_purpose::STANDARD.encode(&chunk.ogg),
             }}));
         }
         let body = json!({
@@ -169,14 +167,13 @@ impl Provider for GeminiProvider {
     }
 
     async fn transcribe(&self, req: TranscribeRequest) -> Result<TranscribeResult, ProviderError> {
-        let sizes = req
-            .chunks
-            .iter()
-            .map(|c| Ok(std::fs::metadata(&c.path)?.len()))
-            .collect::<Result<Vec<_>, std::io::Error>>()?;
+        let sizes: Vec<u64> = req.chunks.iter().map(|c| c.ogg.len() as u64).collect();
         let mut segments = Vec::new();
+        let mut speakers = 0;
         for range in batches(&sizes, BATCH_CHUNKS, BATCH_BYTES) {
-            segments.extend(self.transcribe_batch(&req.chunks[range], &req).await?);
+            let mut batch = self.transcribe_batch(&req.chunks[range], &req).await?;
+            speakers = relabel(&mut batch, speakers);
+            segments.extend(batch);
         }
         Ok(TranscribeResult { segments })
     }
@@ -207,6 +204,26 @@ impl Provider for GeminiProvider {
         let analyze = transcript * FLASH_IN + ANALYSIS_OUT_TOKENS * FLASH_OUT;
         (transcribe + analyze) / 1_000_000.0
     }
+}
+
+/// Renumbers a batch's speakers after the `before` already used, in order of first
+/// appearance: Gemini's "Speaker 1" in one batch need not be the same voice in the next
+/// (ADR-021). Returns the speakers used so far.
+fn relabel(segments: &mut [TranscriptSegment], before: usize) -> usize {
+    let mut seen: Vec<String> = Vec::new();
+    for seg in segments.iter_mut() {
+        if let Some(label) = seg.speaker_label.take() {
+            let n = match seen.iter().position(|l| *l == label) {
+                Some(i) => i,
+                None => {
+                    seen.push(label);
+                    seen.len() - 1
+                }
+            };
+            seg.speaker_label = Some(format!("Speaker {}", before + n + 1));
+        }
+    }
+    before + seen.len()
 }
 
 /// Splits chunks into runs of at most `max_chunks` and `max_bytes` (a lone oversized chunk

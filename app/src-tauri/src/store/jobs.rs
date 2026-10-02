@@ -120,6 +120,25 @@ impl<'a> JobRepo<'a> {
         Ok(())
     }
 
+    /// Parks the job until something it needs exists (an API key): queued with no run
+    /// time, and the attempt it just made does not count.
+    pub fn park(&self, id: &str, error: &str) -> Result<(), StoreError> {
+        self.conn.execute(
+            "UPDATE jobs SET status = ?2, next_run_at = NULL, attempts = max(attempts - 1, 0),
+             error = ?3, updated_at = ?4 WHERE id = ?1",
+            params![id, JobStatus::Queued.as_str(), error, now_ms()],
+        )?;
+        Ok(())
+    }
+
+    /// Makes parked jobs due at `now`. Returns how many.
+    pub fn release_parked(&self, now: i64) -> Result<usize, StoreError> {
+        Ok(self.conn.execute(
+            "UPDATE jobs SET next_run_at = ?2, updated_at = ?2 WHERE status = ?1 AND next_run_at IS NULL",
+            params![JobStatus::Queued.as_str(), now],
+        )?)
+    }
+
     /// Jobs a crash or quit left `running` go back to the queue, due now. Steps are
     /// idempotent, so running one again is safe. Returns how many.
     pub fn requeue_running(&self, now: i64) -> Result<usize, StoreError> {
@@ -216,6 +235,26 @@ mod tests {
             repo.get(&id).unwrap(),
             ("queued".into(), 1, Some(7_000), None)
         );
+    }
+
+    #[test]
+    fn nfr_7_parked_jobs_wait_until_released_without_using_attempts() {
+        let store = Store::open_in_memory().unwrap();
+        let conn = store.conn().unwrap();
+        let repo = JobRepo::new(&conn);
+        let m = processing(&conn, 1_000);
+        let id = repo.enqueue(&m, "transcribe_mic", 0).unwrap();
+        repo.start(&id).unwrap();
+        repo.park(&id, "No key").unwrap();
+        assert_eq!(
+            repo.get(&id).unwrap(),
+            ("queued".into(), 0, None, Some("No key".into()))
+        );
+        assert_eq!(repo.next_due(i64::MAX).unwrap(), None);
+        assert_eq!(repo.next_run_at().unwrap(), None);
+        assert_eq!(repo.release_parked(9_000).unwrap(), 1);
+        assert_eq!(repo.next_due(9_000).unwrap().unwrap().id, id);
+        assert_eq!(repo.release_parked(10_000).unwrap(), 0);
     }
 
     #[test]

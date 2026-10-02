@@ -6,8 +6,6 @@ pub mod gemini;
 pub mod keys;
 mod service;
 
-use std::path::PathBuf;
-
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
@@ -38,7 +36,7 @@ impl ProviderId {
 }
 
 /// What a provider can do.
-#[allow(dead_code, reason = "read by the pipeline from 1.9 on")]
+#[allow(dead_code, reason = "read when choosing a provider, from Phase 4 on")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Capabilities {
     pub stt: bool,
@@ -48,16 +46,25 @@ pub struct Capabilities {
     pub offline: bool,
 }
 
-/// One decrypted temporary Ogg Opus chunk file and where it starts in the meeting.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// One decrypted Ogg Opus chunk, in memory only (ADR-021), and where it starts in the meeting.
+#[derive(Clone, PartialEq, Eq)]
 pub struct AudioChunk {
-    pub path: PathBuf,
+    pub ogg: Vec<u8>,
     pub start_ms: i64,
+}
+
+impl std::fmt::Debug for AudioChunk {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AudioChunk")
+            .field("bytes", &self.ogg.len())
+            .field("start_ms", &self.start_ms)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TranscribeRequest {
-    /// In time order. Deleted by the caller after the call.
+    /// In time order.
     pub chunks: Vec<AudioChunk>,
     /// BCP-47 code; `None` lets the provider detect it.
     pub language: Option<String>,
@@ -72,7 +79,8 @@ pub struct TranscriptSegment {
     pub start_ms: i64,
     pub end_ms: i64,
     pub text: String,
-    /// The provider's label ("Speaker 1"); `None` when not diarized.
+    /// The provider's label ("Speaker 1"); `None` when not diarized. One label never
+    /// stands for two voices, but one voice may get two labels (ADR-021).
     pub speaker_label: Option<String>,
 }
 
@@ -106,8 +114,6 @@ pub enum ProviderError {
     InvalidOutput(String),
     #[error("{0}")]
     Unsupported(String),
-    #[error("could not read an audio chunk: {0}")]
-    Io(#[from] std::io::Error),
 }
 
 impl From<ProviderError> for AppError {
@@ -116,16 +122,12 @@ impl From<ProviderError> for AppError {
             ProviderError::Unavailable(m) => Self::ProviderUnavailable(m),
             ProviderError::Rejected(m) | ProviderError::Unsupported(m) => Self::ProviderRejected(m),
             ProviderError::InvalidOutput(m) => Self::InvalidLlmOutput(m),
-            ProviderError::Io(e) => {
-                tracing::debug!(error = %e, "audio chunk read failed");
-                Self::Storage("A recording file could not be read. It may be damaged.".into())
-            }
         }
     }
 }
 
 /// STT and LLM behind one interface (docs/06 "Provider trait").
-#[allow(dead_code, reason = "the pipeline steps call it from 1.9 on")]
+#[allow(dead_code, reason = "analyze and embed are called from Phase 2 on")]
 #[async_trait::async_trait]
 pub trait Provider: Send + Sync {
     fn id(&self) -> ProviderId;

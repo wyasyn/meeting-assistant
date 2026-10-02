@@ -110,6 +110,21 @@ impl<'a> MeetingRepo<'a> {
         Ok(())
     }
 
+    /// Audio folder (relative to the app data dir) and language of a meeting.
+    pub fn processing_info(
+        &self,
+        id: &str,
+    ) -> Result<Option<(String, Option<String>)>, StoreError> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT audio_dir, language FROM meetings WHERE id = ?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?)
+    }
+
     pub fn status(&self, id: &str) -> Result<Option<String>, StoreError> {
         Ok(self
             .conn

@@ -21,7 +21,7 @@ Agents: pick the first unchecked task in the current phase, do only that, tick i
 - [x] 1.6 End detection: app closed / mic released / 2 min silence → prompt to stop (FR-1.6).
 - [x] 1.7 Job queue with retries/backoff and `job:progress` events (NFR-7).
 - [x] 1.8 `Provider` trait + Gemini provider (transcribe + analyze), API key in keychain, settings screen with "Test key" (FR-8.1).
-- [ ] 1.9 Pipeline: transcribe mic (is_me) + system (diarized), merge with echo de-dup (FR-3.1, FR-3.2, FR-2.2).
+- [x] 1.9 Pipeline: transcribe mic (is_me) + system (diarized), merge with echo de-dup (FR-3.1, FR-3.2, FR-2.2).
 - [ ] 1.10 Transcript view: speakers, timestamps, click-to-play, rename speaker (FR-3.3, FR-3.8).
 
 **Exit criteria:** a real 30-minute Google Meet call on Fedora is detected, recorded with consent, transcribed with "me" correct, speakers renameable, no audio lost when the app is killed mid-call.

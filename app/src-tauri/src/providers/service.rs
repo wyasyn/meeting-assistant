@@ -85,7 +85,6 @@ impl ProviderService {
     }
 
     /// The provider built with its saved key.
-    #[allow(dead_code, reason = "the pipeline steps call it from 1.9 on")]
     pub fn get(&self, provider: ProviderId) -> Result<Arc<dyn Provider>, AppError> {
         let key = self.keys.get(provider)?.ok_or_else(|| no_key(provider))?;
         Ok((self.make)(provider, key)?)
@@ -114,7 +113,6 @@ impl ProviderService {
                 ok: true,
                 message: format!("{} accepted the key.", provider.label()),
             },
-            Err(ProviderError::Io(e)) => return Err(ProviderError::Io(e).into()),
             Err(e) => TestResult {
                 ok: false,
                 message: e.to_string(),

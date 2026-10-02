@@ -36,14 +36,14 @@ flowchart LR
 ```
 - Live phase (A–D) runs in-process; capture never waits on the network.
 - Post-call steps E–I are rows in `jobs`; each step is idempotent and resumable.
-- Queue (ADR-019): one worker thread runs one step at a time, in pipeline order; a step's success queues the next, the last one sets the meeting `ready`. Retryable errors (`AppError.retryable`) come back after 30 s, 2 min, 8 min, 32 min, then 1 h, up to 6 attempts; anything else, or the 6th failure, sets the job and the meeting `failed` (audio kept). At startup `running` jobs are queued again, and `processing` meetings without jobs get their first step.
+- Queue (ADR-019): one worker thread runs one step at a time, in pipeline order; a step's success queues the next, the last one sets the meeting `ready`. Retryable errors (`AppError.retryable`) come back after 30 s, 2 min, 8 min, 32 min, then 1 h, up to 6 attempts; anything else, or the 6th failure, sets the job and the meeting `failed` (audio kept). A missing API key (`no_api_key`) parks the job instead: it waits, uncounted, until a key is saved (ADR-021). At startup `running` jobs are queued again, and `processing` meetings without jobs get their first step.
 
 ## Pipeline steps
 | Step | Input | Output | Notes |
 | --- | --- | --- | --- |
-| `transcribe_mic` | mic chunks | segments (`is_me`) | own track → always the user |
-| `transcribe_system` | system chunks | segments + diarization labels | provider diarization or sidecar pyannote |
-| `merge` | both segment sets | ordered segments | sort by `start_ms`; drop mic segments that duplicate system text within 300 ms (echo) |
+| `transcribe_mic` | mic chunks | segments + one `Me` speaker (`is_me`) | own track → always the user, not diarized; chunks decrypted in memory only; replaces the track on rerun |
+| `transcribe_system` | system chunks | segments + `Speaker N` speakers | provider diarization (sidecar pyannote later); speakers numbered per 30 min batch so one label never covers two voices |
+| `merge` | both segment sets | ordered segments | segments are read by `start_ms`; drop a mic segment when system speech overlaps it within 300 ms and holds 60% of its words (echo) |
 | `metrics` | segments | metric rows in `scores` (`kind = metric:*`) | pure Rust, no network |
 | `analyze` | transcript + metrics + template | `reports`, `action_items`, `scores` | JSON schema validated |
 | `index` | segments, report | FTS rows, embeddings | embeddings optional (S) |
@@ -62,6 +62,7 @@ End of meeting (ADR-018, `detector/end.rs`), only while a recording runs or is p
 
 ## Security model
 - DB key: random 256-bit key stored in the OS keychain; SQLCipher opens with it. Audio chunks encrypted with the same key (AES-GCM via `aes-gcm`).
+- Audio: decrypted only in memory, for the provider call; plain audio never touches the disk.
 - API keys: one keychain entry per provider (`api-key:<provider>` under the bundle identifier), read when a provider is built and sent only to that provider over TLS, in a header marked sensitive. The UI only learns whether a key is saved.
 - Sidecar: random port + one-time bearer token passed at spawn; binds to 127.0.0.1 only; receives file paths, not raw audio.
 - No remote code, no telemetry. Tauri capabilities restricted to required APIs.

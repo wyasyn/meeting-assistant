@@ -3,6 +3,7 @@
 use tauri::State;
 
 use crate::error::AppError;
+use crate::jobs::JobService;
 use crate::providers::{ProviderEntry, ProviderId, ProviderService, TestResult};
 
 #[tauri::command]
@@ -10,13 +11,17 @@ pub fn list_providers(service: State<'_, ProviderService>) -> Result<Vec<Provide
     service.list()
 }
 
+/// Also starts meetings that were waiting for a key (ADR-021).
 #[tauri::command]
 pub fn set_api_key(
     service: State<'_, ProviderService>,
+    jobs: State<'_, JobService>,
     provider: ProviderId,
     key: String,
 ) -> Result<(), AppError> {
-    service.set_key(provider, &key)
+    service.set_key(provider, &key)?;
+    jobs.resume();
+    Ok(())
 }
 
 #[tauri::command]

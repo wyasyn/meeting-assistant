@@ -46,16 +46,37 @@ pub fn run() {
             let db = Arc::new(db);
             app.manage(Arc::clone(&db));
             // API keys live in the keychain next to the database key (FR-8.1).
-            app.manage(providers::ProviderService::new(
+            let providers = providers::ProviderService::new(
                 Arc::new(providers::keys::KeyringApiKeys::new(
                     app.config().identifier.clone(),
                 )),
                 providers::ProviderService::default_factory(),
-            ));
-            // Post-call processing (NFR-7). Steps join the pipeline from 1.9 on.
+            );
+            app.manage(providers.clone());
+            // Post-call processing (NFR-7, ADR-021).
+            let transcribe = |track| {
+                Box::new(jobs::steps::TranscribeStep {
+                    store: Arc::clone(&db),
+                    providers: providers.clone(),
+                    data_dir: data_dir.clone(),
+                    track,
+                })
+            };
+            let pipeline = jobs::Pipeline::default()
+                .with(jobs::Step::TranscribeMic, transcribe(capture::Track::Mic))
+                .with(
+                    jobs::Step::TranscribeSystem,
+                    transcribe(capture::Track::Sys),
+                )
+                .with(
+                    jobs::Step::Merge,
+                    Box::new(jobs::steps::MergeStep {
+                        store: Arc::clone(&db),
+                    }),
+                );
             app.manage(jobs::JobService::start(
                 Arc::clone(&db),
-                jobs::Pipeline::default(),
+                pipeline,
                 Arc::new(commands::jobs::TauriJobEvents(app.handle().clone())),
             ));
             let recording = recording::RecordingService::new(
