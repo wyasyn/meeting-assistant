@@ -316,10 +316,8 @@ fn format_param() -> Result<Vec<u8>, CaptureError> {
 /// Interleaved little-endian f32 to mono by averaging channels.
 fn downmix(bytes: &[u8], channels: u32) -> Vec<f32> {
     let channels = channels.max(1) as usize;
-    let samples: Vec<f32> = bytes
-        .chunks_exact(4)
-        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-        .collect();
+    let (words, _) = bytes.as_chunks::<4>();
+    let samples: Vec<f32> = words.iter().map(|b| f32::from_le_bytes(*b)).collect();
     if channels == 1 {
         return samples;
     }
