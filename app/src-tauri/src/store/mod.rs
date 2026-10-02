@@ -3,10 +3,7 @@
 
 pub mod key;
 mod migrations;
-#[allow(
-    dead_code,
-    reason = "first caller is the start-on-login setting (roadmap 0.6)"
-)]
+#[allow(dead_code, reason = "first caller arrives with the FR-8.3 settings")]
 pub mod settings;
 
 use std::path::Path;
@@ -114,7 +111,7 @@ impl Store {
     }
 
     /// Locks the connection. Repos borrow it: `SettingsRepo::new(&store.conn()?)`.
-    #[allow(dead_code, reason = "first caller arrives with roadmap 0.6")]
+    #[allow(dead_code, reason = "first caller arrives with the FR-8.3 settings")]
     pub fn conn(&self) -> Result<MutexGuard<'_, Connection>, StoreError> {
         self.conn.lock().map_err(|_| StoreError::Poisoned)
     }

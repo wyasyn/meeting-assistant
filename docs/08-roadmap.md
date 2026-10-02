@@ -10,7 +10,7 @@ Agents: pick the first unchecked task in the current phase, do only that, tick i
 - [x] 0.3 GitHub Actions: lint + test on Linux; build-only on Windows and macOS.
 - [x] 0.4 `AppError` type, `tracing` setup with file logs, typed `lib/ipc.ts` skeleton.
 - [x] 0.5 Store: SQLCipher connection with key from keychain, migration runner, migration `0001_init.sql` from `05-data-model.md`; repo tests.
-- [ ] 0.6 Tray icon with menu (Open, Start recording, Quit) and start-on-login setting (FR-8.5).
+- [x] 0.6 Tray icon with menu (Open, Start recording, Quit) and start-on-login setting (FR-8.5).
 
 ## Phase 1 — Record and transcribe (MVP core)
 - [ ] 1.1 `AudioBackend` trait + `PipeWireBackend`: list devices, capture mic and default output monitor as two tracks (FR-2.1, FR-2.3). Spike first; record findings in `09-decisions.md`.

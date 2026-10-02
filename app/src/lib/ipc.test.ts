@@ -1,7 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AppError, INTERNAL_MESSAGE, call, isAppErrorPayload, on } from "./ipc";
+import {
+  AppError,
+  INTERNAL_MESSAGE,
+  call,
+  getSettings,
+  isAppErrorPayload,
+  on,
+  setSettings,
+} from "./ipc";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
@@ -48,6 +56,18 @@ describe("call", () => {
       message: INTERNAL_MESSAGE,
       retryable: false,
       original: rejection,
+    });
+  });
+});
+
+describe("settings commands", () => {
+  it("call get_settings and set_settings with the contract names", async () => {
+    invokeMock.mockResolvedValue({ startOnLogin: true });
+    await getSettings();
+    await setSettings({ startOnLogin: true });
+    expect(invokeMock).toHaveBeenNthCalledWith(1, "get_settings", undefined);
+    expect(invokeMock).toHaveBeenNthCalledWith(2, "set_settings", {
+      settings: { startOnLogin: true },
     });
   });
 });

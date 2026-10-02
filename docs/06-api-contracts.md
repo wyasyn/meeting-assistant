@@ -19,11 +19,13 @@ Names here are the contract between UI, core, sidecar and providers. Changing on
 | `export_meeting` | `{ id, format: "md" \| "pdf" \| "docx" \| "srt" \| "json", path }` | `string` (path) | FR-7.1 |
 | `add_highlight` | `{ note? }` | `Highlight` | FR-9.1 |
 | `delete_meetings` | `{ ids?: string[], all?: boolean }` | `number` | NFR-15 |
-| `get_settings` / `set_settings` | `Settings` | `Settings` | FR-8.3 |
+| `get_settings` / `set_settings` | none / `{ settings: Settings }` | `Settings` | FR-8.3, FR-8.5 |
 | `set_api_key` / `clear_api_key` | `{ provider, key? }` | `void` (stored in keychain) | FR-8.1 |
 | `test_provider` | `{ provider }` | `{ ok, message }` | FR-8.1 |
 | `list_audio_devices` | — | `AudioDevice[]` | FR-2.3 |
 | `set_app_rule` | `{ sourceApp, rule }` | `void` | FR-1.7 |
+
+`Settings { startOnLogin: boolean }` for now; FR-8.3 fields (language, summary length, template, retention) join it later. `startOnLogin` is read from the OS login item, not stored in SQLite.
 
 ## Tauri events (core → UI)
 | Event | Payload |

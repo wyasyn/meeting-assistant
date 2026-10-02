@@ -35,6 +35,9 @@ Frontend: ESLint 10 flat config with typescript-eslint `strictTypeChecked` + `st
 ## ADR-011 (2026-10-02): Store encryption, key handling and migrations
 `rusqlite` with `bundled-sqlcipher-vendored-openssl`, so every OS builds the same SQLCipher with no system OpenSSL. The key is 32 random bytes (`getrandom`) stored as a binary secret in the OS keychain via `keyring` 4 (service = bundle identifier, account `db-key`; Secret Service over zbus on Linux, no extra system package) and passed as a raw hex key, so there is no passphrase derivation. If the database exists but the key is gone, opening fails with a readable storage error and no new key is made, since that would lock the data out for good. Migrations use a small in-house runner (`include_str!` + `PRAGMA user_version`, one transaction per file) instead of a crate. The connection sits behind a `Mutex` in Tauri state until the job queue needs a pool.
 
+## ADR-012 (2026-10-02): Tray-resident app and start on login
+Closing the main window hides it; the app keeps running in the tray so detection can work in the background, and Quit in the tray menu exits. The window starts hidden and is shown in setup unless the process got `--minimized`, which only the login item passes (FR-8.5). Start on login uses `tauri-plugin-autostart`, and the OS login item is the source of truth (no copy in `settings`), so it cannot drift if the user removes it outside the app. `tauri-plugin-single-instance` makes a second launch show the running window instead of opening the encrypted database twice. "Start recording" is in the tray menu but disabled until recording exists (roadmap 1.3). On GNOME the tray needs the AppIndicator extension (Fedora: `gnome-shell-extension-appindicator`); without it a second launch still brings the window back.
+
 ## Open questions (owner to decide)
 - [ ] Product name and bundle identifier.
 - [ ] Default cloud STT: Gemini alone, or Deepgram/AssemblyAI for better diarization?

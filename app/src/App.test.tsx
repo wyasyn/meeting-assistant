@@ -1,7 +1,12 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import App from "@/App";
 import { APP_NAME } from "@/config";
+
+vi.mock("@/lib/ipc", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/ipc")>()),
+  getSettings: vi.fn(() => Promise.resolve({ startOnLogin: false })),
+}));
 
 describe("App", () => {
   it("shows the app name", () => {

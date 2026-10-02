@@ -71,6 +71,21 @@ export async function call<T>(command: string, args?: InvokeArgs): Promise<T> {
   }
 }
 
+/** Mirrors Rust `commands::settings::Settings`. FR-8.3 fields join later. */
+export interface Settings {
+  /** FR-8.5: start on login, minimised to the tray. */
+  startOnLogin: boolean;
+}
+
+export function getSettings(): Promise<Settings> {
+  return call<Settings>("get_settings");
+}
+
+/** Applies `settings` and resolves to the settings now in effect. */
+export function setSettings(settings: Settings): Promise<Settings> {
+  return call<Settings>("set_settings", { settings });
+}
+
 /** Listens to an event and passes only its payload. Resolves to the unlisten function. */
 // The per-event helpers pick T, so the single use is intended.
 // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters
