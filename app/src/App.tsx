@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { APP_NAME } from "@/config";
 import { ConsentPrompts } from "@/features/consent/ConsentPrompts";
 import { EndPrompt } from "@/features/consent/EndPrompt";
@@ -9,21 +9,36 @@ import { initRecording } from "@/features/recording/store";
 import { ApiKeys } from "@/features/settings/ApiKeys";
 import { AppRules } from "@/features/settings/AppRules";
 import { StartOnLoginToggle } from "@/features/settings/StartOnLoginToggle";
+import { MeetingList } from "@/features/transcript/MeetingList";
+import { TranscriptView } from "@/features/transcript/TranscriptView";
 
 function App() {
   useEffect(() => initRecording(), []);
   useEffect(() => initConsent(), []);
+  const [openMeeting, setOpenMeeting] = useState<string | null>(null);
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background px-4 text-foreground">
+    <main className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background px-4 py-12 text-foreground">
       <RecordingIndicator />
       <h1 className="text-2xl font-semibold">{APP_NAME}</h1>
       <ConsentPrompts />
       <EndPrompt />
       <RecordingControls />
-      <AppRules />
-      <ApiKeys />
-      <StartOnLoginToggle />
+      {openMeeting ? (
+        <TranscriptView
+          meetingId={openMeeting}
+          onBack={() => {
+            setOpenMeeting(null);
+          }}
+        />
+      ) : (
+        <>
+          <MeetingList onOpen={setOpenMeeting} />
+          <AppRules />
+          <ApiKeys />
+          <StartOnLoginToggle />
+        </>
+      )}
     </main>
   );
 }

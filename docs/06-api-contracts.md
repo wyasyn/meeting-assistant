@@ -8,11 +8,12 @@ Names here are the contract between UI, core, sidecar and providers. Changing on
 | `start_recording` | `{ meetingId?: string, sourceApp?: string, title?: string }` (`meetingId` reserved for 1.5) | `MeetingSummary` | FR-1.4 |
 | `pause_recording` / `resume_recording` / `stop_recording` / `get_recording_state` | none | `RecordingState` | FR-1.4 |
 | `respond_to_prompt` | `{ signalId, choice: "record" \| "not_now" \| "never" }` | `void` | FR-1.3 |
-| `list_meetings` | `{ query?, tag?, sourceApp?, from?, to?, cursor?, limit? }` | `Page<MeetingSummary>` | FR-6.1 |
-| `get_meeting` | `{ id }` | `MeetingDetail` (segments, speakers, report, actions, scores) | FR-4.3 |
+| `list_meetings` | `{ query?, tag?, sourceApp?, from?, to?, cursor?, limit? }` (only `cursor` and `limit` so far; `limit` 1 to 200, default 50) | `Page<MeetingSummary>`, newest first | FR-6.1 |
+| `get_meeting` | `{ id }` | `MeetingDetail` (segments, speakers, report, actions, scores; report, actions and scores join in Phase 2) | FR-4.3 |
 | `search` | `{ text, limit? }` | `SearchHit[]` | FR-6.2 |
 | `ask` | `{ question, meetingIds? }` | `{ answer, citations: SegmentRef[] }` | FR-6.4 |
-| `rename_speaker` | `{ speakerId, name, personId? }` | `Speaker` | FR-3.3 |
+| `rename_speaker` | `{ speakerId, name, personId? }` (`personId` reserved for FR-3.4) | `Speaker`: the one that now holds the name. A name another speaker on the same side already has (ignoring case) merges the two; blank or over 100 characters is `invalid_state` | FR-3.3 |
+| `get_segment_audio` | `{ segmentId }` | raw bytes (`ArrayBuffer`): the segment's stretch of its own track as a 16 kHz mono 16-bit WAV, at most 10 min; `not_found` once the audio is deleted (ADR-022) | FR-3.8 |
 | `update_segment_text` | `{ segmentId, text }` | `Segment` | FR-3.7 |
 | `set_action_item_done` | `{ id, done }` | `ActionItem` | FR-6.5 |
 | `reprocess` | `{ meetingId, fromStep }` | `void` | FR-4.6 |
@@ -28,6 +29,9 @@ Names here are the contract between UI, core, sidecar and providers. Changing on
 | `list_app_rules` | none | `AppRuleEntry[]` | FR-1.7 |
 
 `MeetingSummary { id, title, sourceApp, startedAt, endedAt: number | null, durationS: number | null, status }` (times epoch ms).
+`Page<T> { items: T[], nextCursor: string | null }`: pass `nextCursor` back as `cursor`; `null` on the last page.
+`MeetingDetail { meeting: MeetingSummary, speakers: Speaker[], segments: Segment[], hasAudio }`: speakers "Me" first; segments of both tracks in time order; `hasAudio` false once retention deleted the audio.
+`Speaker { id, label, isMe }`. `Segment { id, track: "mic" | "sys", speakerId: string | null, startMs, endMs, text }` (ms from the meeting start; `speakerId` null when the provider could not tell who spoke).
 `RecordingState { meetingId: string | null, state: "idle" | "recording" | "paused" | "stopped", elapsedMs, error: string | null }`: `idle` = nothing recorded since launch; `elapsedMs` counts recorded time only (paused time excluded); `error` explains a recording that stopped by itself.
 `AudioDevice { id, name, kind: "input" | "output", isDefault }` (`id` is the PipeWire `node.name` on Linux). Recording uses the system defaults until the FR-8.3 device setting exists.
 `AppRuleEntry { sourceApp, rule }`: one per known app (`zoom`, `slack`, `teams`, `discord`, `browser`), `ask` when none is set. Starting a recording from a prompt is `start_recording { sourceApp }` with no title; the core names it "<App> meeting".

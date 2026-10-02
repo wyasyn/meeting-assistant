@@ -1,7 +1,8 @@
 //! `segments` and `speakers`: the transcript (FR-3.1, FR-3.2, FR-2.2, ADR-021).
 //! Each track is written whole by its transcribe step, so a rerun replaces it.
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
+use serde::Serialize;
 
 use super::{now_ms, StoreError};
 use crate::capture::Track;
@@ -19,7 +20,8 @@ pub struct NewSegment {
     pub speaker_label: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Segment {
     pub id: String,
     pub track: String,
@@ -29,8 +31,8 @@ pub struct Segment {
     pub text: String,
 }
 
-#[allow(dead_code, reason = "read by the transcript view (1.10)")]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Speaker {
     pub id: String,
     pub label: String,
@@ -125,7 +127,6 @@ impl<'a> SegmentRepo<'a> {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
-    #[allow(dead_code, reason = "read by the transcript view (1.10)")]
     pub fn speakers(&self, meeting_id: &str) -> Result<Vec<Speaker>, StoreError> {
         let mut stmt = self.conn.prepare(
             "SELECT id, label, is_me FROM speakers WHERE meeting_id = ?1 ORDER BY is_me DESC, rowid",
@@ -138,6 +139,84 @@ impl<'a> SegmentRepo<'a> {
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Renames a speaker; every segment follows (FR-3.3). When another speaker of the same
+    /// meeting and side (`is_me`) already has that name, ignoring case, this one is merged
+    /// into it: its segments move over and it is deleted (ADR-022). Returns the speaker that
+    /// now holds the name, `None` when `speaker_id` does not exist. `name` must be trimmed.
+    pub fn rename_speaker(
+        &self,
+        speaker_id: &str,
+        name: &str,
+    ) -> Result<Option<Speaker>, StoreError> {
+        let tx = self.conn.unchecked_transaction()?;
+        let Some((meeting_id, is_me)) = tx
+            .query_row(
+                "SELECT meeting_id, is_me FROM speakers WHERE id = ?1",
+                [speaker_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?)),
+            )
+            .optional()?
+        else {
+            return Ok(None);
+        };
+        let now = now_ms();
+        let same_name: Option<String> = tx
+            .query_row(
+                "SELECT id FROM speakers
+                 WHERE meeting_id = ?1 AND is_me = ?2 AND id != ?3 AND lower(label) = lower(?4)
+                 ORDER BY rowid LIMIT 1",
+                params![meeting_id, is_me, speaker_id, name],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let kept = match same_name {
+            Some(other) => {
+                tx.execute(
+                    "UPDATE segments SET speaker_id = ?2, updated_at = ?3 WHERE speaker_id = ?1",
+                    params![speaker_id, other, now],
+                )?;
+                tx.execute("DELETE FROM speakers WHERE id = ?1", [speaker_id])?;
+                other
+            }
+            None => speaker_id.to_owned(),
+        };
+        tx.execute(
+            "UPDATE speakers SET label = ?2, updated_at = ?3 WHERE id = ?1",
+            params![kept, name, now],
+        )?;
+        tx.commit()?;
+        Ok(Some(Speaker {
+            id: kept,
+            label: name.to_owned(),
+            is_me,
+        }))
+    }
+
+    /// Meeting, track and times of one segment.
+    pub fn locate(&self, segment_id: &str) -> Result<Option<(String, Segment)>, StoreError> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT meeting_id, id, track, speaker_id, start_ms, end_ms, text FROM segments
+                 WHERE id = ?1",
+                [segment_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        Segment {
+                            id: row.get(1)?,
+                            track: row.get(2)?,
+                            speaker_id: row.get(3)?,
+                            start_ms: row.get(4)?,
+                            end_ms: row.get(5)?,
+                            text: row.get(6)?,
+                        },
+                    ))
+                },
+            )
+            .optional()?)
     }
 
     pub fn delete(&self, ids: &[String]) -> Result<(), StoreError> {
@@ -252,5 +331,104 @@ mod tests {
         let id = repo.list(&m.id).unwrap()[0].id.clone();
         repo.delete(&[id]).unwrap();
         assert!(repo.list(&m.id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn fr_3_3_rename_applies_to_every_line_and_merges_a_split_voice() {
+        let store = Store::open_in_memory().unwrap();
+        let conn = store.conn().unwrap();
+        let m = MeetingRepo::new(&conn)
+            .create_recording("Standup", "zoom", 0)
+            .unwrap();
+        let repo = SegmentRepo::new(&conn);
+        repo.replace_track(&m.id, Track::Mic, &[seg(0, "Hi", None)])
+            .unwrap();
+        repo.replace_track(
+            &m.id,
+            Track::Sys,
+            &[
+                seg(1_000, "One", Some("Speaker 1")),
+                seg(2_000, "Two", Some("Speaker 2")),
+                seg(3_000, "Three", Some("Speaker 1")),
+            ],
+        )
+        .unwrap();
+        let id_of = |label: &str| {
+            repo.speakers(&m.id)
+                .unwrap()
+                .into_iter()
+                .find(|s| s.label == label)
+                .unwrap()
+                .id
+        };
+        let labels = || -> Vec<String> {
+            let speakers = repo.speakers(&m.id).unwrap();
+            repo.list(&m.id)
+                .unwrap()
+                .iter()
+                .map(|seg| {
+                    let id = seg.speaker_id.as_ref().unwrap();
+                    speakers.iter().find(|s| &s.id == id).unwrap().label.clone()
+                })
+                .collect()
+        };
+        let (me, s1, s2) = (id_of("Me"), id_of("Speaker 1"), id_of("Speaker 2"));
+
+        struct Case {
+            name: &'static str,
+            speaker: String,
+            to: &'static str,
+            kept: String,
+            lines: [&'static str; 4],
+        }
+        let cases = [
+            Case {
+                name: "plain rename",
+                speaker: s1.clone(),
+                to: "Ann",
+                kept: s1.clone(),
+                lines: ["Me", "Ann", "Speaker 2", "Ann"],
+            },
+            Case {
+                name: "me can be renamed",
+                speaker: me.clone(),
+                to: "Yasin",
+                kept: me.clone(),
+                lines: ["Yasin", "Ann", "Speaker 2", "Ann"],
+            },
+            Case {
+                name: "same name as me does not merge across sides",
+                speaker: s2.clone(),
+                to: "yasin",
+                kept: s2.clone(),
+                lines: ["Yasin", "Ann", "yasin", "Ann"],
+            },
+            Case {
+                name: "same name on the same side merges, ignoring case",
+                speaker: s2.clone(),
+                to: "ANN",
+                kept: s1.clone(),
+                lines: ["Yasin", "ANN", "ANN", "ANN"],
+            },
+        ];
+        for case in cases {
+            let got = repo
+                .rename_speaker(&case.speaker, case.to)
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                (got.id, got.label.as_str()),
+                (case.kept, case.to),
+                "{}",
+                case.name
+            );
+            assert_eq!(labels(), case.lines, "{}", case.name);
+        }
+        assert_eq!(repo.speakers(&m.id).unwrap().len(), 2);
+        assert_eq!(repo.rename_speaker(&s2, "Gone").unwrap(), None);
+
+        let first = repo.list(&m.id).unwrap()[0].clone();
+        assert_eq!(repo.locate(&first.id).unwrap(), Some((m.id.clone(), first)));
+        assert_eq!(repo.locate("missing").unwrap(), None);
     }
 }

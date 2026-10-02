@@ -51,7 +51,7 @@ pub struct RecordingTarget {
 }
 
 impl RecordingTarget {
-    fn chunk_path(&self, track: Track, index: u32) -> PathBuf {
+    pub fn chunk_path(&self, track: Track, index: u32) -> PathBuf {
         self.dir.join(track.as_str()).join(chunk_file_name(index))
     }
 }

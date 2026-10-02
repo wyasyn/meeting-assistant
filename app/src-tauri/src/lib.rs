@@ -5,6 +5,7 @@ mod detector;
 pub mod error;
 mod jobs;
 mod logging;
+mod meetings;
 mod metrics;
 mod providers;
 mod recording;
@@ -45,6 +46,10 @@ pub fn run() {
             }
             let db = Arc::new(db);
             app.manage(Arc::clone(&db));
+            app.manage(meetings::MeetingService::new(
+                Arc::clone(&db),
+                data_dir.clone(),
+            ));
             // API keys live in the keychain next to the database key (FR-8.1).
             let providers = providers::ProviderService::new(
                 Arc::new(providers::keys::KeyringApiKeys::new(
@@ -145,6 +150,10 @@ pub fn run() {
             commands::providers::set_api_key,
             commands::providers::clear_api_key,
             commands::providers::test_provider,
+            commands::meetings::list_meetings,
+            commands::meetings::get_meeting,
+            commands::meetings::rename_speaker,
+            commands::meetings::get_segment_audio,
         ])
         .build(tauri::generate_context!());
 

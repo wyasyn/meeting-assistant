@@ -6,6 +6,7 @@ pub mod encoder;
 pub mod fake;
 #[cfg(target_os = "linux")]
 mod pipewire;
+pub mod playback;
 pub mod recorder;
 pub mod recovery;
 

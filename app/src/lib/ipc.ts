@@ -268,6 +268,63 @@ export function testProvider(provider: ProviderId) {
   return call<TestResult>("test_provider", { provider });
 }
 
+/** Mirrors Rust `meetings::Page`. Pass `nextCursor` back as `cursor`; `null` on the last page. */
+export interface Page<T> {
+  items: T[];
+  nextCursor: string | null;
+}
+
+/** Mirrors Rust `store::segments::Speaker`. `isMe` is the mic track (rule 4). */
+export interface Speaker {
+  id: string;
+  label: string;
+  isMe: boolean;
+}
+
+/** Mirrors Rust `store::segments::Segment`. Times are ms from the meeting start. */
+export interface Segment {
+  id: string;
+  track: "mic" | "sys";
+  /** `null` when the provider could not tell who spoke. */
+  speakerId: string | null;
+  startMs: number;
+  endMs: number;
+  text: string;
+}
+
+/** Mirrors Rust `meetings::MeetingDetail`. Report, actions and scores join in Phase 2. */
+export interface MeetingDetail {
+  meeting: MeetingSummary;
+  /** "Me" first, then the other side in order of first appearance. */
+  speakers: Speaker[];
+  /** Both tracks, in time order. */
+  segments: Segment[];
+  /** False once the audio was deleted; lines can no longer be played. */
+  hasAudio: boolean;
+}
+
+/** Newest first. Other filters join with the library (FR-6.1) and search (FR-6.2). */
+export function listMeetings(args: { cursor?: string; limit?: number } = {}) {
+  return call<Page<MeetingSummary>>("list_meetings", args);
+}
+
+export function getMeeting(id: string) {
+  return call<MeetingDetail>("get_meeting", { id });
+}
+
+/**
+ * FR-3.3: every line of the speaker follows. A name another speaker on the same side
+ * already has merges the two; the result is the speaker that now holds the name.
+ */
+export function renameSpeaker(speakerId: string, name: string) {
+  return call<Speaker>("rename_speaker", { speakerId, name });
+}
+
+/** FR-3.8: the line's audio as a 16 kHz mono WAV file, held in memory only. */
+export function getSegmentAudio(segmentId: string) {
+  return call<ArrayBuffer>("get_segment_audio", { segmentId });
+}
+
 /** Listens to an event and passes only its payload. Resolves to the unlisten function. */
 // The per-event helpers pick T, so the single use is intended.
 // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters

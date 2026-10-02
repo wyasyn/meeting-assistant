@@ -1,0 +1,59 @@
+//! `list_meetings`, `get_meeting`, `rename_speaker`, `get_segment_audio` (FR-3.3, FR-3.8,
+//! FR-6.1 partial). Thin: the work is in `crate::meetings`.
+
+use tauri::ipc::Response;
+use tauri::State;
+
+use crate::error::AppError;
+use crate::meetings::{MeetingDetail, MeetingService, Page};
+use crate::recording::MeetingSummary;
+use crate::store::segments::Speaker;
+
+/// Runs database and decoding work off the main thread.
+async fn blocking<T: Send + 'static>(
+    service: &MeetingService,
+    work: impl FnOnce(&MeetingService) -> Result<T, AppError> + Send + 'static,
+) -> Result<T, AppError> {
+    let service = service.clone();
+    tauri::async_runtime::spawn_blocking(move || work(&service))
+        .await
+        .map_err(AppError::internal)?
+}
+
+/// The other filters in the contract (`query`, `tag`, `sourceApp`, dates) join in 2.5 and 3.1.
+#[tauri::command]
+pub async fn list_meetings(
+    service: State<'_, MeetingService>,
+    cursor: Option<String>,
+    limit: Option<u32>,
+) -> Result<Page<MeetingSummary>, AppError> {
+    blocking(&service, move |s| s.list(cursor.as_deref(), limit)).await
+}
+
+#[tauri::command]
+pub async fn get_meeting(
+    service: State<'_, MeetingService>,
+    id: String,
+) -> Result<MeetingDetail, AppError> {
+    blocking(&service, move |s| s.detail(&id)).await
+}
+
+/// `personId` is reserved for FR-3.4.
+#[tauri::command]
+pub async fn rename_speaker(
+    service: State<'_, MeetingService>,
+    speaker_id: String,
+    name: String,
+) -> Result<Speaker, AppError> {
+    blocking(&service, move |s| s.rename_speaker(&speaker_id, &name)).await
+}
+
+/// A WAV file as raw bytes (an `ArrayBuffer` in the window), never a path (ADR-022).
+#[tauri::command]
+pub async fn get_segment_audio(
+    service: State<'_, MeetingService>,
+    segment_id: String,
+) -> Result<Response, AppError> {
+    let wav = blocking(&service, move |s| s.segment_audio(&segment_id)).await?;
+    Ok(Response::new(wav))
+}

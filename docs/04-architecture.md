@@ -20,8 +20,9 @@ flowchart LR
 | --- | --- | --- |
 | `detector` | Watch processes, PipeWire mic/output streams, extension messages, calendar; emit `MeetingDetected` / `MeetingEnded` | `DetectorSource` trait, `MeetingSignal` |
 | `consent` | Apply the per-app rule to each detection; prompt as a notification (Record / Not now / Never) and in the window; start recording on Record or an `always` rule; ask "Meeting over?" (Stop / Keep recording) when the meeting seems to end | `ConsentService`, `Notifier` trait, `RecordingControl` |
-| `capture` | Record mic + system tracks, encode Opus, write 10 s chunks, live level meters | `AudioBackend` trait (`PipeWireBackend`, `WasapiBackend`, `MacBackend`) |
+| `capture` | Record mic + system tracks, encode Opus, write 10 s chunks, live level meters; decode a stretch back for playback | `AudioBackend` trait (`PipeWireBackend`, `WasapiBackend`, `MacBackend`) |
 | `jobs` | Persistent queue; runs pipeline steps; retries with backoff | `Job`, `Step` enum, `Pipeline` |
+| `meetings` | Read meetings back for the window: recent list, transcript, speaker rename and merge, a line's audio as an in-memory WAV (ADR-022) | `MeetingService` |
 | `metrics` | Deterministic metrics from segments | `MeetingMetrics` |
 | `providers` | STT + LLM calls behind one interface; API keys in the keychain; "Test key"; cost estimates | `Provider` trait, `ProviderService`, `ApiKeys` trait |
 | `store` | Migrations, repositories, FTS/vector indexing, encryption key handling | `MeetingRepo`, `SegmentRepo`, … |

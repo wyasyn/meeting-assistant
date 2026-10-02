@@ -1,4 +1,4 @@
-//! `meetings` table: as much as recording and crash recovery need (FR-2.4, NFR-6).
+//! `meetings` table: recording, crash recovery (FR-2.4, NFR-6) and reading meetings back (1.10).
 
 use rusqlite::{params, Connection, OptionalExtension};
 
@@ -33,6 +33,38 @@ pub struct OpenRecording {
     /// Relative to the app data dir.
     pub audio_dir: String,
     pub started_at: i64,
+}
+
+/// One `meetings` row as the library and transcript view read it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MeetingRow {
+    pub id: String,
+    pub title: String,
+    pub source_app: String,
+    pub started_at: i64,
+    pub ended_at: Option<i64>,
+    pub duration_s: Option<i64>,
+    pub status: String,
+    /// Relative to the app data dir.
+    pub audio_dir: String,
+    pub audio_deleted_at: Option<i64>,
+}
+
+const ROW_COLUMNS: &str =
+    "id, title, source_app, started_at, ended_at, duration_s, status, audio_dir, audio_deleted_at";
+
+fn meeting_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MeetingRow> {
+    Ok(MeetingRow {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        source_app: row.get(2)?,
+        started_at: row.get(3)?,
+        ended_at: row.get(4)?,
+        duration_s: row.get(5)?,
+        status: row.get(6)?,
+        audio_dir: row.get(7)?,
+        audio_deleted_at: row.get(8)?,
+    })
 }
 
 pub struct MeetingRepo<'a> {
@@ -125,6 +157,34 @@ impl<'a> MeetingRepo<'a> {
             .optional()?)
     }
 
+    pub fn get(&self, id: &str) -> Result<Option<MeetingRow>, StoreError> {
+        Ok(self
+            .conn
+            .query_row(
+                &format!("SELECT {ROW_COLUMNS} FROM meetings WHERE id = ?1"),
+                [id],
+                meeting_row,
+            )
+            .optional()?)
+    }
+
+    /// Newest first. `before` is the `started_at` of the last meeting of the previous page;
+    /// UUID v7 ids break ties, so the cursor is `(started_at, id)`.
+    pub fn list(
+        &self,
+        before: Option<(i64, &str)>,
+        limit: u32,
+    ) -> Result<Vec<MeetingRow>, StoreError> {
+        let (started_at, id) = before.unwrap_or((i64::MAX, ""));
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {ROW_COLUMNS} FROM meetings
+             WHERE started_at < ?1 OR (started_at = ?1 AND id < ?2)
+             ORDER BY started_at DESC, id DESC LIMIT ?3"
+        ))?;
+        let rows = stmt.query_map(params![started_at, id, limit], meeting_row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     pub fn status(&self, id: &str) -> Result<Option<String>, StoreError> {
         Ok(self
             .conn
@@ -167,5 +227,42 @@ mod tests {
         assert_eq!(repo.status("missing").unwrap(), None);
         repo.delete(&a.id).unwrap();
         assert_eq!(repo.status(&a.id).unwrap(), None);
+    }
+
+    #[test]
+    fn fr_6_1_lists_newest_first_in_pages() {
+        let store = Store::open_in_memory().unwrap();
+        let conn = store.conn().unwrap();
+        let repo = MeetingRepo::new(&conn);
+        let a = repo.create_recording("A", "zoom", 1_000).unwrap();
+        let b = repo.create_recording("B", "zoom", 2_000).unwrap();
+        let c = repo.create_recording("C", "zoom", 2_000).unwrap();
+        repo.finish(&a.id, 61_000, 60, MeetingStatus::Ready)
+            .unwrap();
+
+        let titles = |rows: Vec<MeetingRow>| rows.into_iter().map(|r| r.title).collect::<Vec<_>>();
+        let page = repo.list(None, 2).unwrap();
+        let last = page.last().unwrap().clone();
+        assert_eq!(titles(page), ["C", "B"]);
+        let next = repo.list(Some((last.started_at, &last.id)), 2).unwrap();
+        assert_eq!(titles(next), ["A"]);
+
+        let row = repo.get(&a.id).unwrap().unwrap();
+        assert_eq!(
+            row,
+            MeetingRow {
+                id: a.id.clone(),
+                title: "A".into(),
+                source_app: "zoom".into(),
+                started_at: 1_000,
+                ended_at: Some(61_000),
+                duration_s: Some(60),
+                status: "ready".into(),
+                audio_dir: a.audio_dir,
+                audio_deleted_at: None,
+            }
+        );
+        assert_eq!(repo.get("missing").unwrap(), None);
+        assert!(b.id < c.id);
     }
 }
