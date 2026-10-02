@@ -1,5 +1,7 @@
 # Meeting Assistant (working name)
 
+[![CI](https://github.com/wyasyn/meeting-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/wyasyn/meeting-assistant/actions/workflows/ci.yml)
+
 Desktop app that detects your meetings (Meet, Zoom, Slack, Teams, …), asks to record, and gives you a speaker-labelled transcript, summary, action items, meeting scores and coaching. Local-first; Fedora first, then Windows and macOS.
 
 ## For coding agents

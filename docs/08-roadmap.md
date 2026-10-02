@@ -7,7 +7,7 @@ Agents: pick the first unchecked task in the current phase, do only that, tick i
 ## Phase 0 — Foundations
 - [x] 0.1 Scaffold repo per AGENTS.md layout: Tauri 2 + React + TS (strict) + Vite + Tailwind + shadcn/ui in `app/`; `sidecar/` with uv + FastAPI `/health`; root `.gitignore`, `.editorconfig`, README.
 - [x] 0.2 Lint/format/test tooling: ESLint, Prettier, Vitest; rustfmt, clippy (`-D warnings`); ruff, pytest. All commands in AGENTS.md pass on an empty project.
-- [ ] 0.3 GitHub Actions: lint + test on Linux; build-only on Windows and macOS.
+- [x] 0.3 GitHub Actions: lint + test on Linux; build-only on Windows and macOS.
 - [ ] 0.4 `AppError` type, `tracing` setup with file logs, typed `lib/ipc.ts` skeleton.
 - [ ] 0.5 Store: SQLCipher connection with key from keychain, migration runner, migration `0001_init.sql` from `05-data-model.md`; repo tests.
 - [ ] 0.6 Tray icon with menu (Open, Start recording, Quit) and start-on-login setting (FR-8.5).
