@@ -36,6 +36,7 @@ flowchart LR
 ```
 - Live phase (A–D) runs in-process; capture never waits on the network.
 - Post-call steps E–I are rows in `jobs`; each step is idempotent and resumable.
+- Queue (ADR-019): one worker thread runs one step at a time, in pipeline order; a step's success queues the next, the last one sets the meeting `ready`. Retryable errors (`AppError.retryable`) come back after 30 s, 2 min, 8 min, 32 min, then 1 h, up to 6 attempts; anything else, or the 6th failure, sets the job and the meeting `failed` (audio kept). At startup `running` jobs are queued again, and `processing` meetings without jobs get their first step.
 
 ## Pipeline steps
 | Step | Input | Output | Notes |

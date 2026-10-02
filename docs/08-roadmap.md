@@ -19,7 +19,7 @@ Agents: pick the first unchecked task in the current phase, do only that, tick i
 - [x] 1.4 Detector v1: process watch + PipeWire stream watch for Zoom, Slack, Teams, Discord and browsers; debounced `meeting:detected` (FR-1.1, FR-1.2 partial).
 - [x] 1.5 Consent prompt notification with Record / Not now / Never; app rules table (FR-1.3, FR-1.7).
 - [x] 1.6 End detection: app closed / mic released / 2 min silence → prompt to stop (FR-1.6).
-- [ ] 1.7 Job queue with retries/backoff and `job:progress` events (NFR-7).
+- [x] 1.7 Job queue with retries/backoff and `job:progress` events (NFR-7).
 - [ ] 1.8 `Provider` trait + Gemini provider (transcribe + analyze), API key in keychain, settings screen with "Test key" (FR-8.1).
 - [ ] 1.9 Pipeline: transcribe mic (is_me) + system (diarized), merge with echo de-dup (FR-3.1, FR-3.2, FR-2.2).
 - [ ] 1.10 Transcript view: speakers, timestamps, click-to-play, rename speaker (FR-3.3, FR-3.8).

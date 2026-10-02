@@ -42,7 +42,7 @@ Names here are the contract between UI, core, sidecar and providers. Changing on
 | `recording:state` | `RecordingState` |
 | `recording:levels` | `{ micDb, sysDb }` (≤10 Hz), dBFS from -90 to 0; `null` when that device sent no audio in the last 100 ms |
 | `caption:segment` | `Segment` (live captions, FR-3.5) |
-| `job:progress` | `{ meetingId, step, status, attempt, error? }` |
+| `job:progress` | `{ meetingId, step, status: "queued" \| "running" \| "done" \| "failed", attempt, error? }`: `running` when an attempt starts (attempt from 1), `done` when it succeeds, `queued` with `error` when a retry is scheduled, `failed` with `error` when the step gave up and the meeting is `failed`. `error` is readable text, absent when there is none (NFR-7) |
 | `meeting:ready` | `{ meetingId }` |
 
 ## Errors

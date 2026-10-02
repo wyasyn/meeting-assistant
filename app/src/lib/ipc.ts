@@ -217,6 +217,24 @@ export function setAppRule(sourceApp: DetectedApp, rule: AppRule) {
   return call<undefined>("set_app_rule", { sourceApp, rule });
 }
 
+/** Post-call pipeline steps, in order (docs/04 "Pipeline steps"). */
+export type JobStep =
+  "transcribe_mic" | "transcribe_system" | "merge" | "metrics" | "analyze" | "index" | "notify";
+
+/** Mirrors Rust `jobs::JobProgress`; the `job:progress` payload (NFR-7). */
+export interface JobProgress {
+  meetingId: string;
+  step: JobStep;
+  /** `queued` after a failed attempt means a retry is scheduled; `error` says why. */
+  status: "queued" | "running" | "done" | "failed";
+  attempt: number;
+  error?: string;
+}
+
+export function onJobProgress(handler: (progress: JobProgress) => void) {
+  return on<JobProgress>("job:progress", handler);
+}
+
 /** Listens to an event and passes only its payload. Resolves to the unlisten function. */
 // The per-event helpers pick T, so the single use is intended.
 // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters

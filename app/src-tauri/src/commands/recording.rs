@@ -9,7 +9,8 @@ use crate::consent::ConsentService;
 use crate::detector::end::EndReason;
 use crate::detector::MeetingEnded;
 use crate::error::AppError;
-use crate::recording::{MeetingSummary, RecordingEvents, RecordingService, RecordingState};
+use crate::jobs::JobService;
+use crate::recording::{MeetingSummary, Phase, RecordingEvents, RecordingService, RecordingState};
 use crate::tray;
 
 pub const STATE_EVENT: &str = "recording:state";
@@ -31,6 +32,12 @@ impl<R: Runtime> RecordingEvents for TauriEvents<R> {
         tray::show_recording_state(&self.0, state.state);
         if let Some(consent) = self.0.try_state::<ConsentService>() {
             consent.recording_changed(state.state);
+        }
+        // A saved recording waits in `processing`; the queue picks it up now.
+        if state.state == Phase::Stopped {
+            if let Some(jobs) = self.0.try_state::<JobService>() {
+                jobs.wake();
+            }
         }
         self.emit(STATE_EVENT, state.clone());
     }

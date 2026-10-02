@@ -95,6 +95,14 @@ impl<'a> MeetingRepo<'a> {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    pub fn set_status(&self, id: &str, status: MeetingStatus) -> Result<(), StoreError> {
+        self.conn.execute(
+            "UPDATE meetings SET status = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, status.as_str(), now_ms()],
+        )?;
+        Ok(())
+    }
+
     /// Removes a meeting that never got any audio (a start that failed).
     pub fn delete(&self, id: &str) -> Result<(), StoreError> {
         self.conn

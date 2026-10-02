@@ -3,6 +3,7 @@
 
 pub mod app_rules;
 pub mod crypto;
+pub mod jobs;
 pub mod key;
 pub mod meetings;
 mod migrations;

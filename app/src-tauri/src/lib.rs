@@ -45,6 +45,12 @@ pub fn run() {
             }
             let db = Arc::new(db);
             app.manage(Arc::clone(&db));
+            // Post-call processing (NFR-7). Steps join the pipeline from 1.9 on.
+            app.manage(jobs::JobService::start(
+                Arc::clone(&db),
+                jobs::Pipeline::default(),
+                Arc::new(commands::jobs::TauriJobEvents(app.handle().clone())),
+            ));
             let recording = recording::RecordingService::new(
                 capture::default_backend(),
                 Arc::clone(&db),
@@ -116,6 +122,9 @@ pub fn run() {
                 tracing::info!("app exiting");
                 if let Some(detector) = handle.try_state::<detector::DetectorService>() {
                     detector.shutdown();
+                }
+                if let Some(jobs) = handle.try_state::<jobs::JobService>() {
+                    jobs.shutdown();
                 }
                 // Save a running recording before the process ends (rule 3).
                 if let Some(service) = handle.try_state::<recording::RecordingService>() {
