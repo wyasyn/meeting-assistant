@@ -2,7 +2,7 @@
 
 Agents: pick the first unchecked task in the current phase, do only that, tick it when "Definition of done" in AGENTS.md is met.
 
-**Current phase: 1**
+**Current phase: 2**
 
 ## Phase 0 — Foundations
 - [x] 0.1 Scaffold repo per AGENTS.md layout: Tauri 2 + React + TS (strict) + Vite + Tailwind + shadcn/ui in `app/`; `sidecar/` with uv + FastAPI `/health`; root `.gitignore`, `.editorconfig`, README.
@@ -27,7 +27,7 @@ Agents: pick the first unchecked task in the current phase, do only that, tick i
 **Exit criteria:** a real 30-minute Google Meet call on Fedora is detected, recorded with consent, transcribed with "me" correct, speakers renameable, no audio lost when the app is killed mid-call.
 
 ## Phase 2 — Summarise and score
-- [ ] 2.1 `metrics/` module with table-driven tests (all metrics in `07-scoring.md`).
+- [x] 2.1 `metrics/` module with table-driven tests (all metrics in `07-scoring.md`).
 - [ ] 2.2 Analysis prompt + JSON schema validation + retry on invalid output (FR-4.1, FR-4.2).
 - [ ] 2.3 Score combination and storage with evidence (FR-5.1–5.4).
 - [ ] 2.4 Report view: summary, decisions, action items, four scores with "why", suggestions (FR-4.3, FR-5.5).
