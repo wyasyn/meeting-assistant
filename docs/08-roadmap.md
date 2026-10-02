@@ -9,7 +9,7 @@ Agents: pick the first unchecked task in the current phase, do only that, tick i
 - [x] 0.2 Lint/format/test tooling: ESLint, Prettier, Vitest; rustfmt, clippy (`-D warnings`); ruff, pytest. All commands in AGENTS.md pass on an empty project.
 - [x] 0.3 GitHub Actions: lint + test on Linux; build-only on Windows and macOS.
 - [x] 0.4 `AppError` type, `tracing` setup with file logs, typed `lib/ipc.ts` skeleton.
-- [ ] 0.5 Store: SQLCipher connection with key from keychain, migration runner, migration `0001_init.sql` from `05-data-model.md`; repo tests.
+- [x] 0.5 Store: SQLCipher connection with key from keychain, migration runner, migration `0001_init.sql` from `05-data-model.md`; repo tests.
 - [ ] 0.6 Tray icon with menu (Open, Start recording, Quit) and start-on-login setting (FR-8.5).
 
 ## Phase 1 — Record and transcribe (MVP core)

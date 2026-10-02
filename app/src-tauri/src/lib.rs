@@ -15,9 +15,14 @@ use tauri::Manager;
 pub fn run() {
     let app = tauri::Builder::default()
         .setup(|app| {
-            let log_dir = app.path().app_data_dir()?.join("logs");
-            app.manage(logging::init(&log_dir)?);
+            let data_dir = app.path().app_data_dir()?;
+            app.manage(logging::init(&data_dir.join("logs"))?);
             tracing::info!(version = env!("CARGO_PKG_VERSION"), "app started");
+
+            let keys = store::key::KeyringStore::new(app.config().identifier.clone());
+            let db = store::Store::open(&data_dir.join("db").join("app.sqlite"), &keys)
+                .inspect_err(|err| tracing::error!(%err, "could not open the store"))?;
+            app.manage(db);
             Ok(())
         })
         .build(tauri::generate_context!());

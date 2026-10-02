@@ -32,6 +32,9 @@ Frontend: ESLint 10 flat config with typescript-eslint `strictTypeChecked` + `st
 ## ADR-010 (2026-10-02): Error shape and logging
 `AppError` (thiserror) serialises to the contract `{ code, message, retryable }`; a new `internal` code covers failures with no contract code, shows a generic message and logs the detail at debug only (rule 8). Retryable codes: `provider_unavailable`, `invalid_llm_output`, `sidecar_down`. Logs: `tracing-subscriber` with a daily rolling file in `<app_data>/logs/` (7 files kept), stderr in debug builds, default filter `info` overridable by `RUST_LOG`, panics logged by a hook. The UI calls commands only through `call`/`on` in `lib/ipc.ts`, which always reject with an `AppError` instance.
 
+## ADR-011 (2026-10-02): Store encryption, key handling and migrations
+`rusqlite` with `bundled-sqlcipher-vendored-openssl`, so every OS builds the same SQLCipher with no system OpenSSL. The key is 32 random bytes (`getrandom`) stored as a binary secret in the OS keychain via `keyring` 4 (service = bundle identifier, account `db-key`; Secret Service over zbus on Linux, no extra system package) and passed as a raw hex key, so there is no passphrase derivation. If the database exists but the key is gone, opening fails with a readable storage error and no new key is made, since that would lock the data out for good. Migrations use a small in-house runner (`include_str!` + `PRAGMA user_version`, one transaction per file) instead of a crate. The connection sits behind a `Mutex` in Tauri state until the job queue needs a pool.
+
 ## Open questions (owner to decide)
 - [ ] Product name and bundle identifier.
 - [ ] Default cloud STT: Gemini alone, or Deepgram/AssemblyAI for better diarization?

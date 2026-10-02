@@ -1,12 +1,5 @@
-# 05 — Data model (SQLite)
+-- 0001: initial schema, copied from docs/05-data-model.md. Never edit once released (AGENTS.md rule 9).
 
-Source of truth for the schema. Change only through a new migration in `app/src-tauri/migrations/` and update this file in the same commit.
-
-Migrations: `0001_init.sql` is the SQL below. The applied version is stored in `PRAGMA user_version`; the app refuses a database newer than its latest migration.
-
-Conventions: `id` = UUID v7 text; times = epoch ms (INTEGER) UTC; every table has `created_at`, `updated_at` (sync-ready, NFR-27); JSON stored as TEXT validated in Rust.
-
-```sql
 CREATE TABLE people (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -126,13 +119,3 @@ CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INT
 
 CREATE VIRTUAL TABLE segments_fts USING fts5(text, content='segments', content_rowid='rowid');
 -- Phase 3: CREATE VIRTUAL TABLE segment_embeddings USING vec0(segment_id TEXT PRIMARY KEY, embedding float[768]);
-```
-
-## Files on disk
-```
-<app_data>/meetings/<meeting_id>/mic/000001.opus.enc …
-<app_data>/meetings/<meeting_id>/sys/000001.opus.enc …
-<app_data>/db/app.sqlite   (SQLCipher)
-<app_data>/logs/
-```
-`<app_data>` = Tauri `app_data_dir()` (Linux: `~/.local/share/<bundle id>`).
