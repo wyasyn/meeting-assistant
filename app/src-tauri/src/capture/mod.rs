@@ -1,10 +1,13 @@
 //! Audio capture per OS behind the `AudioBackend` trait (FR-2.1, FR-2.3, rule 10).
 //! Every backend delivers two tracks, mic and system output, as 48 kHz mono f32 frames.
 
+pub mod encoder;
 #[cfg(test)]
 pub mod fake;
 #[cfg(target_os = "linux")]
 mod pipewire;
+pub mod recorder;
+pub mod recovery;
 
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::thread::JoinHandle;
@@ -25,6 +28,16 @@ pub const FRAME_QUEUE: usize = 2_048;
 pub enum Track {
     Mic,
     Sys,
+}
+
+impl Track {
+    /// Folder name and `segments.track` value.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Mic => "mic",
+            Self::Sys => "sys",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -70,6 +83,10 @@ pub enum CaptureError {
     DeviceNotFound(String),
     #[error("audio stream failed: {0}")]
     Stream(String),
+    #[error("opus encoding failed: {0}")]
+    Encode(String),
+    #[error("could not save audio: {0}")]
+    Storage(String),
 }
 
 impl From<CaptureError> for AppError {
@@ -83,7 +100,12 @@ impl From<CaptureError> for AppError {
             CaptureError::DeviceNotFound(_) => {
                 "The selected audio device is not available. Choose another one in settings."
             }
-            CaptureError::Stream(_) => "Audio capture stopped unexpectedly.",
+            CaptureError::Stream(_) | CaptureError::Encode(_) => {
+                "Audio capture stopped unexpectedly."
+            }
+            CaptureError::Storage(_) => {
+                "Could not save the recording. Check that the disk has free space."
+            }
         };
         AppError::AudioDevice(message.to_owned())
     }

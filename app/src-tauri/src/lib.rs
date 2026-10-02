@@ -7,7 +7,7 @@ mod logging;
 mod metrics;
 mod providers;
 mod sidecar;
-mod store;
+pub mod store;
 mod tray;
 
 use tauri::Manager;
@@ -35,6 +35,10 @@ pub fn run() {
             let keys = store::key::KeyringStore::new(app.config().identifier.clone());
             let db = store::Store::open(&data_dir.join("db").join("app.sqlite"), &keys)
                 .inspect_err(|err| tracing::error!(%err, "could not open the store"))?;
+            // Close recordings a crash cut off before anything else touches meetings (NFR-6).
+            if let Err(err) = capture::recovery::recover(&db, &data_dir) {
+                tracing::error!(%err, "could not recover interrupted recordings");
+            }
             app.manage(db);
 
             tray::init(app.handle())?;

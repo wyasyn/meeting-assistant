@@ -1,7 +1,9 @@
 //! SQLite repo layer, migrations and encryption.
 //! One SQLCipher file at `<app_data>/db/app.sqlite`, keyed from the OS keychain (NFR-13).
 
+pub mod crypto;
 pub mod key;
+pub mod meetings;
 mod migrations;
 #[allow(dead_code, reason = "first caller arrives with the FR-8.3 settings")]
 pub mod settings;
@@ -13,6 +15,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use rusqlite::{Connection, ErrorCode};
 
 use crate::error::AppError;
+use crypto::AudioKey;
 use key::KeyStore;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -37,6 +40,8 @@ pub enum StoreError {
     TooNew { found: u32, latest: u32 },
     #[error("database lock poisoned")]
     Poisoned,
+    #[error("audio chunk could not be encrypted or decrypted")]
+    Crypto,
 }
 
 impl From<StoreError> for AppError {
@@ -52,6 +57,7 @@ impl From<StoreError> for AppError {
             StoreError::TooNew { .. } => {
                 "The meetings database was saved by a newer version of the app. Please update."
             }
+            StoreError::Crypto => "A recording file could not be read. It may be damaged.",
             _ => "Could not read or write the meetings database.",
         };
         AppError::Storage(message.to_owned())
@@ -68,6 +74,7 @@ pub fn now_ms() -> i64 {
 /// The open, migrated database. Managed as Tauri state.
 pub struct Store {
     conn: Mutex<Connection>,
+    audio_key: AudioKey,
 }
 
 impl Store {
@@ -90,7 +97,7 @@ impl Store {
             Err(e) => return Err(e.into()),
         }
         conn.pragma_update(None, "journal_mode", "WAL")?;
-        let store = Self::init(conn)?;
+        let store = Self::init(conn, AudioKey::new(&key)?)?;
         tracing::info!("store opened");
         Ok(store)
     }
@@ -98,20 +105,28 @@ impl Store {
     /// Unencrypted in-memory database with the full schema, for tests.
     #[cfg(test)]
     pub fn open_in_memory() -> Result<Self, StoreError> {
-        Self::init(Connection::open_in_memory()?)
+        Self::init(
+            Connection::open_in_memory()?,
+            AudioKey::new(&[0x11; key::KEY_LEN])?,
+        )
     }
 
-    fn init(mut conn: Connection) -> Result<Self, StoreError> {
+    fn init(mut conn: Connection, audio_key: AudioKey) -> Result<Self, StoreError> {
         conn.pragma_update(None, "foreign_keys", true)?;
         conn.busy_timeout(BUSY_TIMEOUT)?;
         migrations::migrate(&mut conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
+            audio_key,
         })
     }
 
+    /// Key for audio chunk files; the same key as the database (docs/04).
+    pub fn audio_key(&self) -> &AudioKey {
+        &self.audio_key
+    }
+
     /// Locks the connection. Repos borrow it: `SettingsRepo::new(&store.conn()?)`.
-    #[allow(dead_code, reason = "first caller arrives with the FR-8.3 settings")]
     pub fn conn(&self) -> Result<MutexGuard<'_, Connection>, StoreError> {
         self.conn.lock().map_err(|_| StoreError::Poisoned)
     }

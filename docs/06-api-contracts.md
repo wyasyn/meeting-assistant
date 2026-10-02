@@ -53,7 +53,7 @@ pub trait Provider: Send + Sync {
     fn estimate_cost(&self, audio_seconds: u32, transcript_tokens: u32) -> f64;
 }
 ```
-`TranscribeRequest { audio_paths, language, diarize: bool, vocabulary }` → `TranscribeResult { segments: [{start_ms, end_ms, text, speaker_label?, words?}] }`.
+`TranscribeRequest { audio_paths, language, diarize: bool, vocabulary }`: `audio_paths` are decrypted temporary Ogg Opus chunk files in time order (chunk format in `05-data-model.md`), deleted after the call → `TranscribeResult { segments: [{start_ms, end_ms, text, speaker_label?, words?}] }`.
 
 ## Sidecar HTTP (core → sidecar, 127.0.0.1, `Authorization: Bearer <token>`)
 | Method | Path | Body | Response |

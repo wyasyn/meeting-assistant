@@ -55,7 +55,7 @@ If the repo does not exist yet, scaffold it exactly like this (Phase 0 in the ro
 Fedora prerequisites (once):
 ```bash
 sudo dnf group install "c-development"
-sudo dnf install webkit2gtk4.1-devel openssl-devel curl wget file libappindicator-gtk3-devel librsvg2-devel libxdo-devel pipewire-devel clang opus-devel
+sudo dnf install webkit2gtk4.1-devel openssl-devel curl wget file libappindicator-gtk3-devel librsvg2-devel libxdo-devel pipewire-devel clang cmake
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 Daily:
@@ -68,6 +68,7 @@ cd app/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo te
 cd sidecar && uv sync && uv run ruff check . && uv run ruff format --check . && uv run pytest
 cd sidecar && uv run uvicorn app.main:app --port 0   # sidecar alone (core normally spawns it)
 cd app/src-tauri && cargo run --example capture_spike -- 10 /tmp/spike   # dev only: record both tracks to raw f32 (Linux)
+cd app/src-tauri && cargo run --example record_spike -- record 30 /tmp/rec && cargo run --example record_spike -- decrypt /tmp/rec   # dev only: encrypted Opus chunks
 ```
 Keep these commands working. If you add a script, add it here.
 

@@ -25,8 +25,8 @@ CREATE TABLE meetings (
   ended_at INTEGER,
   duration_s INTEGER,
   scheduled_duration_s INTEGER,         -- from calendar, for overrun
-  status TEXT NOT NULL,                 -- recording | processing | ready | failed
-  audio_dir TEXT NOT NULL,              -- folder with mic/ and sys/ chunk files
+  status TEXT NOT NULL,                 -- recording | processing | ready | failed | interrupted
+  audio_dir TEXT NOT NULL,              -- folder with mic/ and sys/ chunk files, relative to <app_data>
   audio_deleted_at INTEGER,
   calendar_event_id TEXT,
   language TEXT DEFAULT 'en',
@@ -136,3 +136,10 @@ CREATE VIRTUAL TABLE segments_fts USING fts5(text, content='segments', content_r
 <app_data>/logs/
 ```
 `<app_data>` = Tauri `app_data_dir()` (Linux: `~/.local/share/<bundle id>`).
+
+Audio chunks (ADR-014):
+- Chunk N (from 1) holds track time [(N-1) x 10 s, N x 10 s). Gaps in capture are stored as silence, so both tracks share one timeline. The last chunk is usually shorter.
+- Plain content is a self-contained Ogg Opus stream (mono, 48 kHz input, wideband), playable once decrypted. Its last granule position gives the exact length.
+- File = `MAC1` | 12-byte random nonce | AES-256-GCM ciphertext and tag, keyed with the database key. The associated data is `<meeting_id>/<track>/<N>`.
+- Written as `<name>.tmp`, synced, then renamed. A `.tmp` file is a chunk cut off by a crash.
+- At startup, meetings still in `recording` become `interrupted`: `.tmp` files are removed, saved chunks are kept, and `ended_at`/`duration_s` come from the saved audio.
