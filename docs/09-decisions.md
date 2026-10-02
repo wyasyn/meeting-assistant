@@ -29,6 +29,9 @@ The product name is still open. Decision: `productName` "Meeting Assistant", ide
 ## ADR-009 (2026-10-02): Lint and test tooling
 Frontend: ESLint 10 flat config with typescript-eslint `strictTypeChecked` + `stylisticTypeChecked`, react-hooks and react-refresh; `no-explicit-any` is an error. Prettier (with `prettier-plugin-tailwindcss` for class order) runs inside `npm run lint`. Vitest + jsdom + Testing Library, coverage via `@vitest/coverage-v8` (NFR-23). Rust: clippy denies `unwrap_used` and `expect_used` through `[lints.clippy]` in Cargo.toml, with `clippy.toml` allowing them in tests, so the AGENTS.md rule is enforced rather than reviewed. Python: ruff rule sets E, W, F, I, B, UP, SIM, and `ruff format --check` is part of the lint command.
 
+## ADR-010 (2026-10-02): Error shape and logging
+`AppError` (thiserror) serialises to the contract `{ code, message, retryable }`; a new `internal` code covers failures with no contract code, shows a generic message and logs the detail at debug only (rule 8). Retryable codes: `provider_unavailable`, `invalid_llm_output`, `sidecar_down`. Logs: `tracing-subscriber` with a daily rolling file in `<app_data>/logs/` (7 files kept), stderr in debug builds, default filter `info` overridable by `RUST_LOG`, panics logged by a hook. The UI calls commands only through `call`/`on` in `lib/ipc.ts`, which always reject with an `AppError` instance.
+
 ## Open questions (owner to decide)
 - [ ] Product name and bundle identifier.
 - [ ] Default cloud STT: Gemini alone, or Deepgram/AssemblyAI for better diarization?

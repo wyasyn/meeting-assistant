@@ -37,7 +37,7 @@ Names here are the contract between UI, core, sidecar and providers. Changing on
 | `meeting:ready` | `{ meetingId }` |
 
 ## Errors
-`AppError { code: string, message: string, retryable: boolean }`. Codes: `no_api_key`, `provider_unavailable`, `provider_rejected`, `audio_device`, `permission_denied`, `storage`, `invalid_llm_output`, `not_found`, `sidecar_down`.
+`AppError { code: string, message: string, retryable: boolean }`. Codes: `no_api_key`, `provider_unavailable`, `provider_rejected`, `audio_device`, `permission_denied`, `storage`, `invalid_llm_output`, `not_found`, `sidecar_down`, `internal` (unexpected failure; generic message, detail in the log file).
 
 ## Provider trait (Rust)
 ```rust

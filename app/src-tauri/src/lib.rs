@@ -1,17 +1,40 @@
 mod capture;
 mod commands;
 mod detector;
+pub mod error;
 mod jobs;
+mod logging;
 mod metrics;
 mod providers;
 mod sidecar;
 mod store;
 
+use tauri::Manager;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    if let Err(err) = tauri::Builder::default().run(tauri::generate_context!()) {
-        // Logging is set up in roadmap task 0.4; until then stderr is all we have.
-        eprintln!("failed to run the app: {err}");
-        std::process::exit(1);
+    let app = tauri::Builder::default()
+        .setup(|app| {
+            let log_dir = app.path().app_data_dir()?.join("logs");
+            app.manage(logging::init(&log_dir)?);
+            tracing::info!(version = env!("CARGO_PKG_VERSION"), "app started");
+            Ok(())
+        })
+        .build(tauri::generate_context!());
+
+    match app {
+        Ok(app) => app.run(|handle, event| {
+            if let tauri::RunEvent::Exit = event {
+                tracing::info!("app exiting");
+                if let Some(guard) = handle.try_state::<logging::LogGuard>() {
+                    guard.flush();
+                }
+            }
+        }),
+        Err(err) => {
+            // Setup failed, possibly before logging was up, so stderr is the fallback.
+            eprintln!("failed to start the app: {err}");
+            std::process::exit(1);
+        }
     }
 }
