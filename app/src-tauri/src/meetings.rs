@@ -12,6 +12,7 @@ use crate::capture::Track;
 use crate::error::AppError;
 use crate::recording::MeetingSummary;
 use crate::store::meetings::{MeetingRepo, MeetingRow};
+use crate::store::reports::{ActionItem, Report, ReportRepo, Score};
 use crate::store::segments::{Segment, SegmentRepo, Speaker};
 use crate::store::Store;
 
@@ -29,8 +30,8 @@ pub struct Page<T> {
     pub next_cursor: Option<String>,
 }
 
-/// `get_meeting`. Report, action items and scores join in Phase 2.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+/// `get_meeting`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MeetingDetail {
     pub meeting: MeetingSummary,
@@ -40,6 +41,11 @@ pub struct MeetingDetail {
     pub segments: Vec<Segment>,
     /// False once retention removed the audio; lines can no longer be played.
     pub has_audio: bool,
+    /// `None` until analyzed, or when nobody was heard.
+    pub report: Option<Report>,
+    pub action_items: Vec<ActionItem>,
+    /// Headline scores; empty when there was too little data to score.
+    pub scores: Vec<Score>,
 }
 
 #[derive(Clone)]
@@ -79,11 +85,15 @@ impl MeetingService {
             .get(id)?
             .ok_or_else(|| AppError::NotFound(NO_MEETING.into()))?;
         let segments = SegmentRepo::new(&conn);
+        let reports = ReportRepo::new(&conn);
         Ok(MeetingDetail {
             speakers: segments.speakers(id)?,
             segments: segments.list(id)?,
             has_audio: row.audio_deleted_at.is_none(),
             meeting: summary(row),
+            report: reports.get(id)?,
+            action_items: reports.action_items(id)?,
+            scores: reports.headline_scores(id)?,
         })
     }
 
@@ -236,6 +246,8 @@ mod tests {
             .map(|s| (s.label.as_str(), s.is_me))
             .collect();
         assert_eq!(labels, [("Me", true), ("Speaker 1", false)]);
+        assert_eq!(detail.report, None);
+        assert!(detail.action_items.is_empty() && detail.scores.is_empty());
 
         let other = &detail.speakers[1];
         let renamed = h.service.rename_speaker(&other.id, "  Ann ").unwrap();

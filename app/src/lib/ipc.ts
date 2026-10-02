@@ -292,7 +292,84 @@ export interface Segment {
   text: string;
 }
 
-/** Mirrors Rust `meetings::MeetingDetail`. Report, actions and scores join in Phase 2. */
+/** Headline score kinds (FR-5.1 to FR-5.4), in display order. */
+export const SCORE_KINDS = ["engagement", "value", "my_performance", "productivity"] as const;
+
+export type ScoreKind = (typeof SCORE_KINDS)[number];
+
+/** Mirrors Rust `store::reports::Decision`. */
+export interface Decision {
+  text: string;
+  segmentId: string | null;
+}
+
+/** Mirrors Rust `store::reports::Suggestion` (FR-5.5). */
+export interface Suggestion {
+  text: string;
+  scoreKind: ScoreKind;
+  segmentId: string | null;
+}
+
+/** Mirrors Rust `store::reports::Chapter` (FR-4.7). */
+export interface Chapter {
+  title: string;
+  startMs: number;
+}
+
+/** Mirrors Rust `store::reports::Report` (FR-4.1, FR-4.3). */
+export interface Report {
+  summary: string;
+  keyPoints: string[];
+  decisions: Decision[];
+  openQuestions: string[];
+  suggestions: Suggestion[];
+  chapters: Chapter[];
+  modelUsed: string;
+  /** Estimated US dollars (FR-8.4); `null` when unknown. */
+  costUsd: number | null;
+  createdAt: number;
+}
+
+/** Mirrors Rust `store::reports::ActionItem` (FR-4.2). */
+export interface ActionItem {
+  id: string;
+  task: string;
+  /** The name as the transcript has it; "Me" is the user. */
+  ownerLabel: string | null;
+  /** YYYY-MM-DD. */
+  dueDate: string | null;
+  done: boolean;
+  segmentId: string | null;
+}
+
+/** Mirrors Rust `store::reports::ScorePart`: one weighted part of a score. */
+export interface ScorePart {
+  /** `llm`, `balance`, `turns`, `questions`, `decisions`, `action_items`, `talk_ratio`, `wpm`, `fillers`, `interruptions`, `outcomes` or `overrun`. */
+  name: string;
+  /** The parts of a score add up to 1. */
+  weight: number;
+  /** 0 to 100. */
+  score: number;
+}
+
+/** Mirrors Rust `store::reports::Evidence`: why a score is what it is (rule 5). */
+export interface Evidence {
+  /** Raw metric values by metric name (docs/07). */
+  metrics: Record<string, number>;
+  parts: ScorePart[];
+  segmentIds: string[];
+  rationale: string;
+}
+
+/** Mirrors Rust `store::reports::Score`. */
+export interface Score {
+  kind: ScoreKind;
+  /** 0 to 100. */
+  value: number;
+  evidence: Evidence;
+}
+
+/** Mirrors Rust `meetings::MeetingDetail`. */
 export interface MeetingDetail {
   meeting: MeetingSummary;
   /** "Me" first, then the other side in order of first appearance. */
@@ -301,6 +378,11 @@ export interface MeetingDetail {
   segments: Segment[];
   /** False once the audio was deleted; lines can no longer be played. */
   hasAudio: boolean;
+  /** `null` until analyzed, or when nobody was heard. */
+  report: Report | null;
+  actionItems: ActionItem[];
+  /** Headline scores; empty when there was too little data to score. */
+  scores: Score[];
 }
 
 /** Newest first. Other filters join with the library (FR-6.1) and search (FR-6.2). */

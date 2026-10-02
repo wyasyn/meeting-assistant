@@ -1,23 +1,16 @@
 import { render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  AppError,
-  getMeeting,
-  getSegmentAudio,
-  renameSpeaker,
-  type MeetingDetail,
-} from "@/lib/ipc";
+import { AppError, getSegmentAudio, renameSpeaker, type MeetingDetail } from "@/lib/ipc";
 import { TranscriptView } from "./TranscriptView";
 
 vi.mock("@/lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/ipc")>()),
-  getMeeting: vi.fn(),
   getSegmentAudio: vi.fn(),
   renameSpeaker: vi.fn(),
 }));
 
-const getMock = vi.mocked(getMeeting);
 const audioMock = vi.mocked(getSegmentAudio);
 const renameMock = vi.mocked(renameSpeaker);
 const play = vi.fn<() => Promise<void>>();
@@ -47,8 +40,25 @@ function detail(over: Partial<MeetingDetail> = {}): MeetingDetail {
       { id: "d", track: "sys", speakerId: null, startMs: 70_000, endMs: 71_000, text: "Hm" },
     ],
     hasAudio: true,
+    report: null,
+    actionItems: [],
+    scores: [],
     ...over,
   };
+}
+
+/** Holds the detail the way the meeting view does. */
+function View({ initial = detail(), focus }: { initial?: MeetingDetail; focus?: string }) {
+  const [d, setD] = useState(initial);
+  return (
+    <TranscriptView
+      detail={d}
+      focusSegmentId={focus}
+      onChange={(update) => {
+        setD(update);
+      }}
+    />
+  );
 }
 
 /** Speaker column of each line, in order. */
@@ -60,7 +70,6 @@ function lineSpeakers() {
 
 beforeEach(() => {
   vi.resetAllMocks();
-  getMock.mockResolvedValue(detail());
   play.mockResolvedValue(undefined);
   vi.spyOn(window.HTMLMediaElement.prototype, "play").mockImplementation(play);
   vi.spyOn(window.HTMLMediaElement.prototype, "pause").mockImplementation(pause);
@@ -73,10 +82,8 @@ afterEach(() => {
 });
 
 describe("TranscriptView (FR-3.1, FR-3.3, FR-3.8)", () => {
-  it("shows speakers and timestamps, with me marked", async () => {
-    render(<TranscriptView meetingId="m1" onBack={vi.fn()} />);
-    expect(await screen.findByRole("heading", { name: "Standup" })).toBeInTheDocument();
-    expect(getMock).toHaveBeenCalledWith("m1");
+  it("shows speakers and timestamps, with me marked", () => {
+    render(<View />);
     expect(screen.getByText("(you)")).toBeInTheDocument();
     const lines = screen.getAllByRole("button", { name: /^\d+:\d\d/ });
     expect(lines.map((l) => l.textContent)).toEqual([
@@ -89,7 +96,7 @@ describe("TranscriptView (FR-3.1, FR-3.3, FR-3.8)", () => {
 
   it("renames a speaker once for all their lines", async () => {
     renameMock.mockResolvedValue({ id: "s1", label: "Ann", isMe: false });
-    render(<TranscriptView meetingId="m1" onBack={vi.fn()} />);
+    render(<View />);
     await userEvent.click(await screen.findByRole("button", { name: "Rename Speaker 1" }));
     const input = screen.getByLabelText("New name for Speaker 1");
     await userEvent.clear(input);
@@ -102,7 +109,7 @@ describe("TranscriptView (FR-3.1, FR-3.3, FR-3.8)", () => {
 
   it("merges a speaker given another speaker's name", async () => {
     renameMock.mockResolvedValue({ id: "s1", label: "Speaker 1", isMe: false });
-    render(<TranscriptView meetingId="m1" onBack={vi.fn()} />);
+    render(<View />);
     await userEvent.click(await screen.findByRole("button", { name: "Rename Speaker 2" }));
     const input = screen.getByLabelText("New name for Speaker 2");
     await userEvent.clear(input);
@@ -119,7 +126,7 @@ describe("TranscriptView (FR-3.1, FR-3.3, FR-3.8)", () => {
     renameMock.mockRejectedValue(
       new AppError({ code: "invalid_state", message: "Enter a name.", retryable: false }),
     );
-    render(<TranscriptView meetingId="m1" onBack={vi.fn()} />);
+    render(<View />);
     await userEvent.click(await screen.findByRole("button", { name: "Rename Me" }));
     await userEvent.type(screen.getByLabelText("New name for Me"), "{Escape}");
     expect(screen.queryByLabelText("New name for Me")).toBeNull();
@@ -131,7 +138,7 @@ describe("TranscriptView (FR-3.1, FR-3.3, FR-3.8)", () => {
 
   it("plays a line when clicked and stops when clicked again", async () => {
     audioMock.mockResolvedValue(new ArrayBuffer(48));
-    render(<TranscriptView meetingId="m1" onBack={vi.fn()} />);
+    render(<View />);
     const line = await screen.findByRole("button", { name: /Hello/ });
     await userEvent.click(line);
 
@@ -154,20 +161,21 @@ describe("TranscriptView (FR-3.1, FR-3.3, FR-3.8)", () => {
         retryable: false,
       }),
     );
-    render(<TranscriptView meetingId="m1" onBack={vi.fn()} />);
+    render(<View />);
     const line = await screen.findByRole("button", { name: /Hello/ });
     await userEvent.click(line);
     expect(await screen.findByRole("alert")).toHaveTextContent("It may be damaged.");
     expect(line).toHaveAttribute("aria-pressed", "false");
   });
 
-  it("disables playback once the audio is deleted, and goes back", async () => {
-    getMock.mockResolvedValue(detail({ hasAudio: false }));
-    const onBack = vi.fn();
-    render(<TranscriptView meetingId="m1" onBack={onBack} />);
+  it("disables playback once the audio is deleted", async () => {
+    render(<View initial={detail({ hasAudio: false })} />);
     expect(await screen.findByRole("button", { name: /Hello/ })).toBeDisabled();
     expect(screen.getByText(/audio of this meeting was deleted/)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Back" }));
-    expect(onBack).toHaveBeenCalled();
+  });
+
+  it("focuses the line a report link points at", () => {
+    render(<View focus="c" />);
+    expect(screen.getByRole("button", { name: /Yes/ })).toHaveFocus();
   });
 });

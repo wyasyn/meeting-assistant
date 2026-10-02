@@ -3,6 +3,7 @@ import { APP_NAME } from "@/config";
 import { ConsentPrompts } from "@/features/consent/ConsentPrompts";
 import { EndPrompt } from "@/features/consent/EndPrompt";
 import { initConsent } from "@/features/consent/store";
+import { MeetingView } from "@/features/meeting/MeetingView";
 import { RecordingControls } from "@/features/recording/RecordingControls";
 import { RecordingIndicator } from "@/features/recording/RecordingIndicator";
 import { initRecording } from "@/features/recording/store";
@@ -10,7 +11,6 @@ import { ApiKeys } from "@/features/settings/ApiKeys";
 import { AppRules } from "@/features/settings/AppRules";
 import { StartOnLoginToggle } from "@/features/settings/StartOnLoginToggle";
 import { MeetingList } from "@/features/transcript/MeetingList";
-import { TranscriptView } from "@/features/transcript/TranscriptView";
 
 function App() {
   useEffect(() => initRecording(), []);
@@ -25,7 +25,7 @@ function App() {
       <EndPrompt />
       <RecordingControls />
       {openMeeting ? (
-        <TranscriptView
+        <MeetingView
           meetingId={openMeeting}
           onBack={() => {
             setOpenMeeting(null);

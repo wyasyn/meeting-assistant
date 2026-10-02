@@ -3,7 +3,11 @@
 //! the action items, the headline scores and the metrics that come from the analysis. Each
 //! writes its rows whole, in one transaction, so a rerun replaces them.
 
-use rusqlite::{params, Connection};
+use std::collections::BTreeMap;
+
+use rusqlite::{params, Connection, OptionalExtension};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{now_ms, StoreError};
@@ -44,6 +48,98 @@ pub struct NewScore {
     pub evidence: Value,
 }
 
+/// A saved report as the window reads it (FR-4.3). Nested JSON is stored in the schema's
+/// snake_case and sent in camelCase.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Report {
+    pub summary: String,
+    pub key_points: Vec<String>,
+    pub decisions: Vec<Decision>,
+    pub open_questions: Vec<String>,
+    pub suggestions: Vec<Suggestion>,
+    pub chapters: Vec<Chapter>,
+    pub model_used: String,
+    pub cost_usd: Option<f64>,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
+pub struct Decision {
+    pub text: String,
+    #[serde(default)]
+    pub segment_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
+pub struct Suggestion {
+    pub text: String,
+    /// The headline score it would improve.
+    pub score_kind: String,
+    #[serde(default)]
+    pub segment_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
+pub struct Chapter {
+    pub title: String,
+    pub start_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionItem {
+    pub id: String,
+    pub task: String,
+    /// The name as the transcript has it; "Me" is the user.
+    pub owner_label: Option<String>,
+    /// YYYY-MM-DD.
+    pub due_date: Option<String>,
+    pub done: bool,
+    pub segment_id: Option<String>,
+}
+
+/// A headline score and why (rule 5).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Score {
+    pub kind: String,
+    pub value: f64,
+    pub evidence: Evidence,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
+pub struct Evidence {
+    /// Raw metric values the score used, by metric name.
+    #[serde(default)]
+    pub metrics: BTreeMap<String, f64>,
+    #[serde(default)]
+    pub parts: Vec<ScorePart>,
+    #[serde(default)]
+    pub segment_ids: Vec<String>,
+    #[serde(default)]
+    pub rationale: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScorePart {
+    pub name: String,
+    pub weight: f64,
+    pub score: f64,
+}
+
+/// Reads a JSON text column.
+fn json<T: DeserializeOwned>(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<T> {
+    let text: Option<String> = row.get(index)?;
+    serde_json::from_str(text.as_deref().unwrap_or("[]")).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(index, rusqlite::types::Type::Text, Box::new(e))
+    })
+}
+
 pub struct ReportRepo<'a> {
     conn: &'a Connection,
 }
@@ -51,6 +147,70 @@ pub struct ReportRepo<'a> {
 impl<'a> ReportRepo<'a> {
     pub fn new(conn: &'a Connection) -> Self {
         Self { conn }
+    }
+
+    pub fn get(&self, meeting_id: &str) -> Result<Option<Report>, StoreError> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT summary_md, key_points, decisions, open_questions, suggestions, chapters,
+                 model_used, cost_usd, created_at FROM reports WHERE meeting_id = ?1",
+                [meeting_id],
+                |row| {
+                    Ok(Report {
+                        summary: row.get(0)?,
+                        key_points: json(row, 1)?,
+                        decisions: json(row, 2)?,
+                        open_questions: json(row, 3)?,
+                        suggestions: json(row, 4)?,
+                        chapters: json(row, 5)?,
+                        model_used: row.get(6)?,
+                        cost_usd: row.get(7)?,
+                        created_at: row.get(8)?,
+                    })
+                },
+            )
+            .optional()?)
+    }
+
+    /// In the order the analysis listed them.
+    pub fn action_items(&self, meeting_id: &str) -> Result<Vec<ActionItem>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, task, owner_label, due_date, done, segment_id FROM action_items
+             WHERE meeting_id = ?1 ORDER BY rowid",
+        )?;
+        let rows = stmt.query_map([meeting_id], |row| {
+            Ok(ActionItem {
+                id: row.get(0)?,
+                task: row.get(1)?,
+                owner_label: row.get(2)?,
+                due_date: row.get(3)?,
+                done: row.get(4)?,
+                segment_id: row.get(5)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Headline scores in `HEADLINE_KINDS` order; empty when there was too little data.
+    pub fn headline_scores(&self, meeting_id: &str) -> Result<Vec<Score>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT kind, value, evidence FROM scores WHERE meeting_id = ?1 AND kind = ?2",
+        )?;
+        let mut out = Vec::new();
+        for kind in HEADLINE_KINDS {
+            let score = stmt
+                .query_row(params![meeting_id, kind], |row| {
+                    Ok(Score {
+                        kind: row.get(0)?,
+                        value: row.get(1)?,
+                        evidence: json(row, 2)?,
+                    })
+                })
+                .optional()?;
+            out.extend(score);
+        }
+        Ok(out)
     }
 
     /// Replaces the computed `metric:*` rows, leaving the analysis ones alone.
@@ -281,5 +441,72 @@ mod tests {
             )
             .unwrap();
         assert_eq!(items, 1);
+    }
+
+    #[test]
+    fn fr_4_3_saved_analysis_reads_back_in_camel_case() {
+        let store = Store::open_in_memory().unwrap();
+        let conn = store.conn().unwrap();
+        let id = MeetingRepo::new(&conn)
+            .create_recording("Standup", "zoom", 0)
+            .unwrap()
+            .id;
+        let repo = ReportRepo::new(&conn);
+        assert_eq!(repo.get(&id).unwrap(), None);
+        let mut saved = report("Planned the release.");
+        saved.decisions = json!([{ "text": "Ship", "segment_id": "seg-1" }]);
+        saved.suggestions = json!([{ "text": "Ask more", "score_kind": "engagement" }]);
+        saved.chapters = json!([{ "title": "Release", "start_ms": 0 }]);
+        let evidence = json!({
+            "metrics": { "balance": 0.5 },
+            "parts": [{ "name": "llm", "weight": 0.2, "score": 50.0 }],
+            "segment_ids": ["seg-1"],
+            "rationale": "Even."
+        });
+        repo.save_analysis(
+            &id,
+            &saved,
+            &[NewActionItem {
+                owner_label: Some("Me".into()),
+                task: "Write notes".into(),
+                due_date: Some("2026-10-09".into()),
+                segment_id: Some("seg-1".into()),
+            }],
+            &[
+                NewScore {
+                    kind: "productivity".into(),
+                    value: 40.0,
+                    evidence: json!({}),
+                },
+                NewScore {
+                    kind: "engagement".into(),
+                    value: 62.0,
+                    evidence,
+                },
+            ],
+        )
+        .unwrap();
+
+        let got = repo.get(&id).unwrap().unwrap();
+        assert_eq!(got.summary, "Planned the release.");
+        assert_eq!(got.decisions[0].segment_id.as_deref(), Some("seg-1"));
+        let wire = serde_json::to_value(&got).unwrap();
+        assert_eq!(wire["decisions"][0]["segmentId"], "seg-1");
+        assert_eq!(wire["suggestions"][0]["scoreKind"], "engagement");
+        assert_eq!(wire["chapters"][0]["startMs"], 0);
+        assert_eq!(wire["costUsd"], 0.01);
+
+        let items = repo.action_items(&id).unwrap();
+        assert_eq!(
+            (items[0].task.as_str(), items[0].done),
+            ("Write notes", false)
+        );
+        let scores = repo.headline_scores(&id).unwrap();
+        let kinds: Vec<_> = scores.iter().map(|s| s.kind.as_str()).collect();
+        assert_eq!(kinds, ["engagement", "productivity"]);
+        assert_eq!(scores[0].evidence.rationale, "Even.");
+        assert_eq!(scores[1].evidence, Evidence::default());
+        let wire = serde_json::to_value(&scores[0]).unwrap();
+        assert_eq!(wire["evidence"]["segmentIds"], json!(["seg-1"]));
     }
 }

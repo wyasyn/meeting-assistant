@@ -9,7 +9,7 @@ Names here are the contract between UI, core, sidecar and providers. Changing on
 | `pause_recording` / `resume_recording` / `stop_recording` / `get_recording_state` | none | `RecordingState` | FR-1.4 |
 | `respond_to_prompt` | `{ signalId, choice: "record" \| "not_now" \| "never" }` | `void` | FR-1.3 |
 | `list_meetings` | `{ query?, tag?, sourceApp?, from?, to?, cursor?, limit? }` (only `cursor` and `limit` so far; `limit` 1 to 200, default 50) | `Page<MeetingSummary>`, newest first | FR-6.1 |
-| `get_meeting` | `{ id }` | `MeetingDetail` (segments, speakers, report, actions, scores; report, actions and scores join in Phase 2) | FR-4.3 |
+| `get_meeting` | `{ id }` | `MeetingDetail` (segments, speakers, report, actions, scores) | FR-4.3 |
 | `search` | `{ text, limit? }` | `SearchHit[]` | FR-6.2 |
 | `ask` | `{ question, meetingIds? }` | `{ answer, citations: SegmentRef[] }` | FR-6.4 |
 | `rename_speaker` | `{ speakerId, name, personId? }` (`personId` reserved for FR-3.4) | `Speaker`: the one that now holds the name. A name another speaker on the same side already has (ignoring case) merges the two; blank or over 100 characters is `invalid_state` | FR-3.3 |
@@ -30,7 +30,8 @@ Names here are the contract between UI, core, sidecar and providers. Changing on
 
 `MeetingSummary { id, title, sourceApp, startedAt, endedAt: number | null, durationS: number | null, status }` (times epoch ms).
 `Page<T> { items: T[], nextCursor: string | null }`: pass `nextCursor` back as `cursor`; `null` on the last page.
-`MeetingDetail { meeting: MeetingSummary, speakers: Speaker[], segments: Segment[], hasAudio }`: speakers "Me" first; segments of both tracks in time order; `hasAudio` false once retention deleted the audio.
+`MeetingDetail { meeting: MeetingSummary, speakers: Speaker[], segments: Segment[], hasAudio, report: Report | null, actionItems: ActionItem[], scores: Score[] }`: speakers "Me" first; segments of both tracks in time order; `hasAudio` false once retention deleted the audio; `report` null until analyzed or when nobody was heard; `scores` holds the headline scores only, in the order engagement, value, my_performance, productivity, and is empty when there was too little data to score (ADR-025).
+`Report { summary, keyPoints: string[], decisions: { text, segmentId }[], openQuestions: string[], suggestions: { text, scoreKind, segmentId }[], chapters: { title, startMs }[], modelUsed, costUsd: number | null, createdAt }`. `ActionItem { id, task, ownerLabel: string | null, dueDate: string | null, done, segmentId: string | null }` (`ownerLabel` "Me" is the user; `dueDate` YYYY-MM-DD). `Score { kind, value, evidence: { metrics: Record<string, number>, parts: { name, weight, score }[], segmentIds: string[], rationale } }`. Every `segmentId` is a segment of the meeting.
 `Speaker { id, label, isMe }`. `Segment { id, track: "mic" | "sys", speakerId: string | null, startMs, endMs, text }` (ms from the meeting start; `speakerId` null when the provider could not tell who spoke).
 `RecordingState { meetingId: string | null, state: "idle" | "recording" | "paused" | "stopped", elapsedMs, error: string | null }`: `idle` = nothing recorded since launch; `elapsedMs` counts recorded time only (paused time excluded); `error` explains a recording that stopped by itself.
 `AudioDevice { id, name, kind: "input" | "output", isDefault }` (`id` is the PipeWire `node.name` on Linux). Recording uses the system defaults until the FR-8.3 device setting exists.

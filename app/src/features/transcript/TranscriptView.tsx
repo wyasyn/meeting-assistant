@@ -2,7 +2,6 @@ import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import { Button } from "@/components/ui/button";
 import { formatElapsed } from "@/features/recording/format";
 import {
-  getMeeting,
   getSegmentAudio,
   renameSpeaker,
   toAppError,
@@ -11,100 +10,96 @@ import {
 } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
 
-const UNKNOWN_SPEAKER = "Unknown speaker";
+export const UNKNOWN_SPEAKER = "Unknown speaker";
 
-/** FR-3.1, FR-3.3, FR-3.8: the transcript with speakers and timestamps; a line plays its audio. */
-export function TranscriptView({ meetingId, onBack }: { meetingId: string; onBack: () => void }) {
-  const [detail, setDetail] = useState<MeetingDetail | null>(null);
+/**
+ * FR-3.1, FR-3.3, FR-3.8: the transcript with speakers and timestamps; a line plays its audio.
+ * `focusSegmentId` scrolls to that line and marks it, for links from the report.
+ */
+export function TranscriptView({
+  detail,
+  onChange,
+  focusSegmentId,
+}: {
+  detail: MeetingDetail;
+  onChange: (update: (detail: MeetingDetail) => MeetingDetail) => void;
+  focusSegmentId?: string | null;
+}) {
   const [error, setError] = useState<string | null>(null);
   const player = usePlayer(setError);
 
   useEffect(() => {
-    let active = true;
-    getMeeting(meetingId)
-      .then((d) => {
-        if (active) setDetail(d);
-      })
-      .catch((e: unknown) => {
-        if (active) setError(toAppError(e).message);
-      });
-    return () => {
-      active = false;
-    };
-  }, [meetingId]);
+    if (!focusSegmentId) return;
+    const line = document.getElementById(lineId(focusSegmentId));
+    line?.scrollIntoView({ block: "center" });
+    line?.focus();
+  }, [focusSegmentId]);
 
   /** The rename may have merged `from` into another speaker (same name on the same side). */
   function renamed(from: string, to: Speaker) {
-    setDetail(
-      (d) =>
-        d && {
-          ...d,
-          speakers: d.speakers.flatMap((s) => (s.id === to.id ? [to] : s.id === from ? [] : [s])),
-          segments: d.segments.map((seg) =>
-            seg.speakerId === from ? { ...seg, speakerId: to.id } : seg,
-          ),
-        },
-    );
+    onChange((d) => ({
+      ...d,
+      speakers: d.speakers.flatMap((s) => (s.id === to.id ? [to] : s.id === from ? [] : [s])),
+      segments: d.segments.map((seg) =>
+        seg.speakerId === from ? { ...seg, speakerId: to.id } : seg,
+      ),
+    }));
   }
 
-  const names = new Map(detail?.speakers.map((s) => [s.id, s.label]));
+  const names = new Map(detail.speakers.map((s) => [s.id, s.label]));
 
   return (
-    <section className="flex w-full max-w-2xl flex-col gap-4">
-      <div className="flex items-center gap-2">
-        <Button type="button" variant="ghost" size="sm" onClick={onBack}>
-          Back
-        </Button>
-        <h2 className="truncate text-lg font-semibold">{detail?.meeting.title}</h2>
-      </div>
+    <div className="flex flex-col gap-4">
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}
         </p>
       )}
-      {detail && (
-        <>
-          <Speakers speakers={detail.speakers} onRenamed={renamed} onError={setError} />
-          {detail.segments.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nobody was heard in this meeting.</p>
-          ) : (
-            <ol className="flex flex-col gap-1">
-              {detail.segments.map((seg) => {
-                const playing = player.playing === seg.id;
-                const speaker = (seg.speakerId && names.get(seg.speakerId)) ?? UNKNOWN_SPEAKER;
-                return (
-                  <li key={seg.id}>
-                    <button
-                      type="button"
-                      disabled={!detail.hasAudio}
-                      aria-pressed={playing}
-                      title={detail.hasAudio ? (playing ? "Stop" : "Play this line") : undefined}
-                      className={cn(
-                        "grid w-full grid-cols-[4rem_8rem_1fr] gap-2 rounded-md px-2 py-1 text-left text-sm focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none enabled:hover:bg-accent",
-                        playing && "bg-accent",
-                      )}
-                      onClick={() => void player.toggle(seg.id)}
-                    >
-                      <span className="text-muted-foreground tabular-nums">
-                        {formatElapsed(seg.startMs)}
-                      </span>
-                      <span className="truncate font-medium">{speaker}</span>
-                      <span>{seg.text}</span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ol>
-          )}
-          {!detail.hasAudio && (
-            <p className="text-sm text-muted-foreground">
-              The audio of this meeting was deleted, so lines cannot be played.
-            </p>
-          )}
-        </>
+      <Speakers speakers={detail.speakers} onRenamed={renamed} onError={setError} />
+      {detail.segments.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Nobody was heard in this meeting.</p>
+      ) : (
+        <ol className="flex flex-col gap-1">
+          {detail.segments.map((seg) => {
+            const playing = player.playing === seg.id;
+            const speaker = (seg.speakerId && names.get(seg.speakerId)) ?? UNKNOWN_SPEAKER;
+            return (
+              <li key={seg.id}>
+                <button
+                  id={lineId(seg.id)}
+                  type="button"
+                  disabled={!detail.hasAudio}
+                  aria-pressed={playing}
+                  title={detail.hasAudio ? (playing ? "Stop" : "Play this line") : undefined}
+                  className={cn(
+                    "grid w-full grid-cols-[4rem_8rem_1fr] gap-2 rounded-md px-2 py-1 text-left text-sm focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none enabled:hover:bg-accent",
+                    playing && "bg-accent",
+                    focusSegmentId === seg.id && "ring-2 ring-ring",
+                  )}
+                  onClick={() => void player.toggle(seg.id)}
+                >
+                  <span className="text-muted-foreground tabular-nums">
+                    {formatElapsed(seg.startMs)}
+                  </span>
+                  <span className="truncate font-medium">{speaker}</span>
+                  <span>{seg.text}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ol>
       )}
-    </section>
+      {!detail.hasAudio && (
+        <p className="text-sm text-muted-foreground">
+          The audio of this meeting was deleted, so lines cannot be played.
+        </p>
+      )}
+    </div>
   );
+}
+
+function lineId(segmentId: string) {
+  return `line-${segmentId}`;
 }
 
 /** One line plays at a time; clicking the playing line stops it. */
