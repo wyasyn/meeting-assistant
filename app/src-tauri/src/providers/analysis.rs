@@ -1,6 +1,6 @@
 //! `AnalysisJson`: the LLM's analysis as typed data (docs/06 "Analysis JSON schema").
 //! Field names are the schema's snake_case. Parsing plus `check` reject anything off-schema
-//! (rule 6); the segment id check against the meeting joins with the analyze step (2.2).
+//! (rule 6); `resolve_segments` rejects a cited line the meeting does not have.
 
 use serde::{Deserialize, Serialize};
 
@@ -82,6 +82,7 @@ pub struct Chapter {
 }
 
 const WRONG_FORMAT: &str = "The AI returned an analysis in the wrong format.";
+const UNKNOWN_LINE: &str = "The AI cited a transcript line that does not exist.";
 
 impl AnalysisJson {
     /// Parses the LLM's JSON text and checks the bounds the types cannot express.
@@ -92,6 +93,40 @@ impl AnalysisJson {
         })?;
         analysis.check()?;
         Ok(analysis)
+    }
+
+    /// Replaces every cited line ref with what `resolve` maps it to (the segment id). Any
+    /// ref it does not know rejects the whole analysis (rule 6), so nothing is half saved.
+    pub fn resolve_segments(
+        &mut self,
+        resolve: impl Fn(&str) -> Option<String>,
+    ) -> Result<(), ProviderError> {
+        let map = |r: &mut String| -> Result<(), ProviderError> {
+            *r = resolve(r.trim()).ok_or_else(|| {
+                tracing::debug!("analysis cited an unknown line");
+                ProviderError::InvalidOutput(UNKNOWN_LINE.into())
+            })?;
+            Ok(())
+        };
+        let optional = self
+            .decisions
+            .iter_mut()
+            .map(|d| &mut d.segment_id)
+            .chain(self.action_items.iter_mut().map(|a| &mut a.segment_id))
+            .chain(self.suggestions.iter_mut().map(|s| &mut s.segment_id));
+        for r in optional.flatten() {
+            map(r)?;
+        }
+        let scores = [
+            &mut self.scores.value,
+            &mut self.scores.engagement_quality,
+            &mut self.scores.my_contribution,
+            &mut self.scores.productivity,
+        ];
+        for judged in scores {
+            judged.segment_ids.iter_mut().try_for_each(map)?;
+        }
+        Ok(())
     }
 
     fn check(&self) -> Result<(), ProviderError> {
@@ -168,5 +203,35 @@ pub mod tests {
             assert!(matches!(err, ProviderError::InvalidOutput(_)), "{bad}");
         }
         assert!(AnalysisJson::parse("not json").is_err());
+    }
+
+    #[test]
+    fn rule_6_cited_lines_map_to_segment_ids_or_reject() {
+        let mut with_refs = sample();
+        with_refs["action_items"][0]["segment_id"] = json!(" s2 ");
+        with_refs["scores"]["value"]["segment_ids"] = json!(["s1", "s2"]);
+        with_refs["suggestions"][1]["segment_id"] = json!("s1");
+        let resolve = |r: &str| match r {
+            "s1" => Some("id-1".to_owned()),
+            "s2" => Some("id-2".to_owned()),
+            _ => None,
+        };
+        let mut analysis = AnalysisJson::parse(&with_refs.to_string()).unwrap();
+        analysis.resolve_segments(resolve).unwrap();
+        assert_eq!(analysis.decisions[0].segment_id.as_deref(), Some("id-1"));
+        assert_eq!(analysis.action_items[0].segment_id.as_deref(), Some("id-2"));
+        assert_eq!(analysis.scores.value.segment_ids, ["id-1", "id-2"]);
+        assert_eq!(analysis.suggestions[1].segment_id.as_deref(), Some("id-1"));
+        assert_eq!(analysis.suggestions[0].segment_id, None);
+
+        let mut unknown_decision = sample();
+        unknown_decision["decisions"][0]["segment_id"] = json!("s9");
+        let mut unknown_score = sample();
+        unknown_score["scores"]["productivity"]["segment_ids"] = json!(["s1", "s9"]);
+        for bad in [unknown_decision, unknown_score] {
+            let mut analysis = AnalysisJson::parse(&bad.to_string()).unwrap();
+            let err = analysis.resolve_segments(resolve).unwrap_err();
+            assert!(matches!(err, ProviderError::InvalidOutput(_)), "{bad}");
+        }
     }
 }

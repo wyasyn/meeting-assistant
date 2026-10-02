@@ -78,6 +78,19 @@ pub fn run() {
                     Box::new(jobs::steps::MergeStep {
                         store: Arc::clone(&db),
                     }),
+                )
+                .with(
+                    jobs::Step::Metrics,
+                    Box::new(jobs::analyze::MetricsStep {
+                        store: Arc::clone(&db),
+                    }),
+                )
+                .with(
+                    jobs::Step::Analyze,
+                    Box::new(jobs::analyze::AnalyzeStep {
+                        store: Arc::clone(&db),
+                        providers: providers.clone(),
+                    }),
                 );
             app.manage(jobs::JobService::start(
                 Arc::clone(&db),

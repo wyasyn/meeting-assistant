@@ -4,6 +4,7 @@
 pub mod analysis;
 pub mod gemini;
 pub mod keys;
+pub mod prompt;
 mod service;
 
 use serde::{Deserialize, Serialize};
@@ -92,7 +93,8 @@ pub struct TranscribeResult {
 /// Prompt input for the analysis (docs/06 "Analysis JSON schema").
 #[derive(Debug, Clone, PartialEq)]
 pub struct AnalyzeRequest {
-    /// Lines of `[segment_id] [mm:ss] Speaker: text`.
+    /// Lines of `[ref] [mm:ss] Speaker: text`. Refs are short stand-ins for segment ids
+    /// (`s1`, `s2`, ...) that the analyze step maps back (ADR-024).
     pub transcript: String,
     /// The deterministic metrics (docs/07).
     pub metrics: serde_json::Value,
@@ -136,6 +138,10 @@ pub trait Provider: Send + Sync {
     async fn check(&self) -> Result<(), ProviderError>;
     async fn transcribe(&self, req: TranscribeRequest) -> Result<TranscribeResult, ProviderError>;
     async fn analyze(&self, req: AnalyzeRequest) -> Result<AnalysisJson, ProviderError>;
+    /// The model `analyze` uses, stored with the report.
+    fn analysis_model(&self) -> String {
+        self.id().as_str().to_owned()
+    }
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, ProviderError>;
     /// US dollars at current list prices (FR-8.4).
     fn estimate_cost(&self, audio_seconds: u32, transcript_tokens: u32) -> f64;

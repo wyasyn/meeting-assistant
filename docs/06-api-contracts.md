@@ -64,6 +64,7 @@ pub trait Provider: Send + Sync {
     async fn check(&self) -> Result<(), ProviderError>; // "Test key": a free call that proves the key works
     async fn transcribe(&self, req: TranscribeRequest) -> Result<TranscribeResult, ProviderError>;
     async fn analyze(&self, req: AnalyzeRequest) -> Result<AnalysisJson, ProviderError>;
+    fn analysis_model(&self) -> String;                // stored in reports.model_used
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, ProviderError>;
     fn estimate_cost(&self, audio_seconds: u32, transcript_tokens: u32) -> f64;
 }
@@ -108,4 +109,4 @@ Paths only; the sidecar decrypts via a key passed at spawn over stdin, never ove
     "segment_ids": { "type": "array", "items": { "type": "string" } } } } }
 }
 ```
-Prompt input: transcript as lines `[segment_id] [mm:ss] Speaker: text`, the deterministic metrics, the template name, and highlights. Any `segment_id` not present in the meeting → reject and retry.
+Prompt input (`providers/prompt.rs`, shared by every LLM provider): transcript as lines `[ref] [mm:ss] Speaker: text`, the deterministic metrics (talk shares by speaker name), the template name, and highlights. `ref` is a short stand-in for the segment id (`s1`, `s2`, ... in time order) that the analyze step maps back before saving, so every `segment_id`/`segment_ids` in the saved report is a real segment id. Any ref not present in the meeting → reject the whole answer and retry (`invalid_llm_output`, ADR-024). The user is always "Me" in the prompt, whatever their speaker is named.

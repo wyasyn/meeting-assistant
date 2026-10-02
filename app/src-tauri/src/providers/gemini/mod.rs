@@ -13,8 +13,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::{
-    AnalysisJson, AnalyzeRequest, AudioChunk, Capabilities, Provider, ProviderError, ProviderId,
-    TranscribeRequest, TranscribeResult, TranscriptSegment,
+    prompt, AnalysisJson, AnalyzeRequest, AudioChunk, Capabilities, Provider, ProviderError,
+    ProviderId, TranscribeRequest, TranscribeResult, TranscriptSegment,
 };
 
 /// Transcription is most of the tokens, so it uses the cheaper model (ADR-020).
@@ -180,7 +180,7 @@ impl Provider for GeminiProvider {
 
     async fn analyze(&self, req: AnalyzeRequest) -> Result<AnalysisJson, ProviderError> {
         let body = json!({
-            "contents": [{ "role": "user", "parts": [{ "text": analyze_prompt(&req) }] }],
+            "contents": [{ "role": "user", "parts": [{ "text": prompt::analysis(&req) }] }],
             "generationConfig": {
                 "responseMimeType": "application/json",
                 "responseSchema": schema::analysis(),
@@ -188,6 +188,10 @@ impl Provider for GeminiProvider {
             },
         });
         AnalysisJson::parse(&self.generate(ANALYZE_MODEL, body).await?)
+    }
+
+    fn analysis_model(&self) -> String {
+        ANALYZE_MODEL.to_owned()
     }
 
     async fn embed(&self, _texts: &[String]) -> Result<Vec<Vec<f32>>, ProviderError> {
@@ -270,24 +274,6 @@ fn transcribe_prompt(req: &TranscribeRequest) -> String {
         ));
     }
     prompt
-}
-
-/// Placeholder wording; the analysis prompt is designed in roadmap task 2.2.
-fn analyze_prompt(req: &AnalyzeRequest) -> String {
-    let highlights = if req.highlights.is_empty() {
-        "none".to_owned()
-    } else {
-        req.highlights.join("; ")
-    };
-    format!(
-        "You review a recorded meeting for the user, whose lines are marked \"Me\". Using only \
-         the transcript, write the summary, key points, decisions, open questions, action \
-         items, the four judged scores (0 to 100, each with a short rationale) and 3 to 5 \
-         suggestions. Cite segment ids from the transcript where they support a point; never \
-         invent ids. The metrics were computed exactly: use them, do not recompute them.\n\n\
-         Template: {}\nHighlights: {highlights}\nMetrics: {}\n\nTranscript:\n{}",
-        req.template, req.metrics, req.transcript
-    )
 }
 
 #[derive(Deserialize)]

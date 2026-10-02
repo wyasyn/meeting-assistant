@@ -50,6 +50,14 @@ pub struct MeetingRow {
     pub audio_deleted_at: Option<i64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnalysisInfo {
+    pub duration_s: Option<i64>,
+    /// From the calendar, for overrun.
+    pub scheduled_duration_s: Option<i64>,
+    pub template: String,
+}
+
 const ROW_COLUMNS: &str =
     "id, title, source_app, started_at, ended_at, duration_s, status, audio_dir, audio_deleted_at";
 
@@ -153,6 +161,24 @@ impl<'a> MeetingRepo<'a> {
                 "SELECT audio_dir, language FROM meetings WHERE id = ?1",
                 [id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?)
+    }
+
+    /// What the metrics and analyze steps need besides the transcript.
+    pub fn analysis_info(&self, id: &str) -> Result<Option<AnalysisInfo>, StoreError> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT duration_s, scheduled_duration_s, template FROM meetings WHERE id = ?1",
+                [id],
+                |row| {
+                    Ok(AnalysisInfo {
+                        duration_s: row.get(0)?,
+                        scheduled_duration_s: row.get(1)?,
+                        template: row.get(2)?,
+                    })
+                },
             )
             .optional()?)
     }

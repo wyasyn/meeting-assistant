@@ -45,8 +45,8 @@ flowchart LR
 | `transcribe_mic` | mic chunks | segments + one `Me` speaker (`is_me`) | own track → always the user, not diarized; chunks decrypted in memory only; replaces the track on rerun |
 | `transcribe_system` | system chunks | segments + `Speaker N` speakers | provider diarization (sidecar pyannote later); speakers numbered per 30 min batch so one label never covers two voices |
 | `merge` | both segment sets | ordered segments | segments are read by `start_ms`; drop a mic segment when system speech overlaps it within 300 ms and holds 60% of its words (echo) |
-| `metrics` | segments | metric rows in `scores` (`kind = metric:*`) | pure Rust, no network |
-| `analyze` | transcript + metrics + template | `reports`, `action_items`, `scores` | JSON schema validated |
+| `metrics` | segments | metric rows in `scores` (`kind = metric:*`) | pure Rust, no network; replaces its rows on rerun |
+| `analyze` | transcript + metrics + template | `reports`, `action_items`, `scores` | JSON schema validated, cited lines checked; report, items, headline scores and `metric:action_items_count`/`decisions_count` saved in one transaction; a meeting with no segments is not sent |
 | `index` | segments, report | FTS rows, embeddings | embeddings optional (S) |
 | `notify` | — | `meeting:ready` event + OS notification | |
 

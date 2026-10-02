@@ -1,7 +1,6 @@
 //! Deterministic meeting metrics: talk ratio, wpm, fillers, interruptions (docs/07-scoring.md).
 //! Pure functions of the transcript and the meeting's timing; the LLM never computes these
 //! (rule 5). "Me" is the mic track (rule 4). See ADR-023 for how the edge cases are read.
-#![allow(dead_code, reason = "the scoring step stores these from 2.3 on")]
 
 use std::collections::BTreeMap;
 

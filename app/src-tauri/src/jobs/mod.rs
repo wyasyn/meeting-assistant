@@ -3,6 +3,7 @@
 //! queues the next. Retryable failures come back with backoff, others fail the meeting.
 //! Audio is never touched here, so a failed meeting can be processed again (FR-4.6).
 
+pub mod analyze;
 pub mod steps;
 
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
@@ -25,7 +26,7 @@ const IDLE_POLL: Duration = Duration::from_secs(30);
 
 /// Post-call steps, in pipeline order (docs/04 "Pipeline steps").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code, reason = "metrics to notify get runners in Phase 2")]
+#[allow(dead_code, reason = "index and notify get runners later")]
 pub enum Step {
     TranscribeMic,
     TranscribeSystem,

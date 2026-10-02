@@ -7,6 +7,7 @@ pub mod jobs;
 pub mod key;
 pub mod meetings;
 mod migrations;
+pub mod reports;
 pub mod segments;
 #[allow(dead_code, reason = "first caller arrives with the FR-8.3 settings")]
 pub mod settings;
