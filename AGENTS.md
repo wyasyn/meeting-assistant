@@ -21,7 +21,7 @@ Reference requirement IDs (e.g. `FR-2.1`, `NFR-11`) in commit messages, PR descr
 
 ## Stack (summary)
 - Shell: **Tauri 2**, Rust core (stable toolchain, edition 2021).
-- UI: **React 18 + TypeScript (strict) + Vite**, Tailwind CSS, shadcn/ui, TanStack Query, Zustand for UI state.
+- UI: **React 19 + TypeScript (strict) + Vite**, Tailwind CSS v4, shadcn/ui, TanStack Query, Zustand for UI state.
 - Audio: `pipewire` crate (Linux), `cpal` WASAPI loopback (Windows), ScreenCaptureKit (macOS, later). Opus encoding.
 - DB: **SQLite** via `rusqlite` with SQLCipher, FTS5, sqlite-vec. Migrations in `app/src-tauri/migrations/`.
 - Sidecar: **Python 3.11+, FastAPI**, faster-whisper, pyannote.audio; managed with `uv`.

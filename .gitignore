@@ -1,0 +1,45 @@
+# Node / Vite
+node_modules/
+dist/
+dist-ssr/
+*.local
+*.tsbuildinfo
+*.log
+npm-debug.log*
+
+# Rust / Tauri
+app/src-tauri/target/
+app/src-tauri/gen/schemas/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Secrets: keys live in the OS keychain, never in files (AGENTS.md rule 8)
+.env
+.env.*
+
+# User data: recordings, databases and model weights never go in git
+recordings/
+*.opus
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.bin
+*.pt
+*.onnx
+*.safetensors
+*.gguf
+
+# Editors and OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.sw?

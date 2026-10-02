@@ -5,7 +5,7 @@ Performance target is one machine: low CPU while recording, fast post-call proce
 | Layer | Choice | Why |
 | --- | --- | --- |
 | Desktop shell | Tauri 2 (Rust core) | ~10× lighter than Electron; RPM/Flatpak/AppImage, MSI, DMG from one codebase |
-| UI | React 18 + TypeScript (strict) + Vite, Tailwind, shadcn/ui, TanStack Query, Zustand | Owner's strongest stack; runs in Tauri webview |
+| UI | React 19 + TypeScript (strict) + Vite, Tailwind v4, shadcn/ui, TanStack Query, Zustand | Owner's strongest stack; runs in Tauri webview |
 | Audio capture | `pipewire` crate (Linux), `cpal` WASAPI loopback (Windows), ScreenCaptureKit (macOS) | Two separate tracks, low CPU |
 | Audio format | Opus (`audiopus`/`opus` crate), 16 kHz mono per track, 10 s chunks | ~1 MB / 10 min; crash-safe |
 | Meeting detection | `sysinfo` (processes), PipeWire stream events (mic in use), browser extension via native messaging, Google Calendar API | Wayland blocks reading other windows' titles |

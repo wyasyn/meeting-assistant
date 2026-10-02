@@ -20,6 +20,12 @@ Metrics computed in code keep scores consistent and explainable; LLM covers qual
 ## ADR-006 — 2026-10-02 — SQLite (SQLCipher, FTS5, sqlite-vec)
 One encrypted file, fast local search, no server. UUID v7 + timestamps keep it sync-ready.
 
+## ADR-007 (2026-10-02): React 19 + Tailwind v4 instead of React 18
+The stack named React 18, but current shadcn/ui targets React 19 and Tailwind v4, and new components assume them. Decision: scaffold with React 19, Tailwind v4 (`@tailwindcss/vite`, no `tailwind.config`) and shadcn's `cn` package in place of clsx + tailwind-merge. TypeScript 6 deprecates `baseUrl`, so the `@/*` alias uses `paths` only.
+
+## ADR-008 (2026-10-02): Placeholder name and bundle identifier
+The product name is still open. Decision: `productName` "Meeting Assistant", identifier `dev.meetingassistant.app`, Rust crate `meeting-assistant` (lib `meeting_assistant_lib`). UI reads `APP_NAME` from `app/src/config.ts`. Change all four together once a name is chosen; the identifier must be final before the first public release because it sets data and keychain paths.
+
 ## Open questions (owner to decide)
 - [ ] Product name and bundle identifier.
 - [ ] Default cloud STT: Gemini alone, or Deepgram/AssemblyAI for better diarization?
