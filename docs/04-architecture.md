@@ -23,7 +23,7 @@ flowchart LR
 | `capture` | Record mic + system tracks, encode Opus, write 10 s chunks, live level meters | `AudioBackend` trait (`PipeWireBackend`, `WasapiBackend`, `MacBackend`) |
 | `jobs` | Persistent queue; runs pipeline steps; retries with backoff | `Job`, `Step` enum, `Pipeline` |
 | `metrics` | Deterministic metrics from segments | `MeetingMetrics` |
-| `providers` | STT + LLM calls behind one interface; cost estimates | `Provider` trait |
+| `providers` | STT + LLM calls behind one interface; API keys in the keychain; "Test key"; cost estimates | `Provider` trait, `ProviderService`, `ApiKeys` trait |
 | `store` | Migrations, repositories, FTS/vector indexing, encryption key handling | `MeetingRepo`, `SegmentRepo`, … |
 | `sidecar` | Spawn on demand, health-check, stop when idle | `SidecarHandle` |
 | `commands` | Thin `#[tauri::command]` handlers | — |
@@ -62,6 +62,7 @@ End of meeting (ADR-018, `detector/end.rs`), only while a recording runs or is p
 
 ## Security model
 - DB key: random 256-bit key stored in the OS keychain; SQLCipher opens with it. Audio chunks encrypted with the same key (AES-GCM via `aes-gcm`).
+- API keys: one keychain entry per provider (`api-key:<provider>` under the bundle identifier), read when a provider is built and sent only to that provider over TLS, in a header marked sensitive. The UI only learns whether a key is saved.
 - Sidecar: random port + one-time bearer token passed at spawn; binds to 127.0.0.1 only; receives file paths, not raw audio.
 - No remote code, no telemetry. Tauri capabilities restricted to required APIs.
 

@@ -235,6 +235,39 @@ export function onJobProgress(handler: (progress: JobProgress) => void) {
   return on<JobProgress>("job:progress", handler);
 }
 
+/** Mirrors Rust `providers::ProviderId` (FR-8.1). */
+export type ProviderId = "gemini";
+
+/** Mirrors Rust `providers::ProviderEntry`. The key itself never leaves the keychain. */
+export interface ProviderEntry {
+  provider: ProviderId;
+  hasKey: boolean;
+}
+
+/** Mirrors Rust `providers::TestResult`. A refused key is `ok: false`, not an error. */
+export interface TestResult {
+  ok: boolean;
+  message: string;
+}
+
+export function listProviders() {
+  return call<ProviderEntry[]>("list_providers");
+}
+
+/** Saves `key` in the OS keychain. */
+export function setApiKey(provider: ProviderId, key: string) {
+  return call<undefined>("set_api_key", { provider, key });
+}
+
+export function clearApiKey(provider: ProviderId) {
+  return call<undefined>("clear_api_key", { provider });
+}
+
+/** Asks the provider whether it accepts the saved key. */
+export function testProvider(provider: ProviderId) {
+  return call<TestResult>("test_provider", { provider });
+}
+
 /** Listens to an event and passes only its payload. Resolves to the unlisten function. */
 // The per-event helpers pick T, so the single use is intended.
 // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters

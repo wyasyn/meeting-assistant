@@ -24,6 +24,7 @@ vi.mock("@/lib/ipc", async (importOriginal) => ({
   onMeetingPromptClosed: vi.fn(() => Promise.resolve(() => undefined)),
   onMeetingEnded: vi.fn(() => Promise.resolve(() => undefined)),
   listAppRules: vi.fn(() => Promise.resolve([])),
+  listProviders: vi.fn(() => Promise.resolve([])),
 }));
 
 describe("App", () => {

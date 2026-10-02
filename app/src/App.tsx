@@ -6,6 +6,7 @@ import { initConsent } from "@/features/consent/store";
 import { RecordingControls } from "@/features/recording/RecordingControls";
 import { RecordingIndicator } from "@/features/recording/RecordingIndicator";
 import { initRecording } from "@/features/recording/store";
+import { ApiKeys } from "@/features/settings/ApiKeys";
 import { AppRules } from "@/features/settings/AppRules";
 import { StartOnLoginToggle } from "@/features/settings/StartOnLoginToggle";
 
@@ -21,6 +22,7 @@ function App() {
       <EndPrompt />
       <RecordingControls />
       <AppRules />
+      <ApiKeys />
       <StartOnLoginToggle />
     </main>
   );

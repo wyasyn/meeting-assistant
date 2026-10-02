@@ -45,6 +45,13 @@ pub fn run() {
             }
             let db = Arc::new(db);
             app.manage(Arc::clone(&db));
+            // API keys live in the keychain next to the database key (FR-8.1).
+            app.manage(providers::ProviderService::new(
+                Arc::new(providers::keys::KeyringApiKeys::new(
+                    app.config().identifier.clone(),
+                )),
+                providers::ProviderService::default_factory(),
+            ));
             // Post-call processing (NFR-7). Steps join the pipeline from 1.9 on.
             app.manage(jobs::JobService::start(
                 Arc::clone(&db),
@@ -113,6 +120,10 @@ pub fn run() {
             commands::recording::list_audio_devices,
             commands::consent::list_app_rules,
             commands::consent::set_app_rule,
+            commands::providers::list_providers,
+            commands::providers::set_api_key,
+            commands::providers::clear_api_key,
+            commands::providers::test_provider,
         ])
         .build(tauri::generate_context!());
 

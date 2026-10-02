@@ -2,5 +2,6 @@
 
 pub mod consent;
 pub mod jobs;
+pub mod providers;
 pub mod recording;
 pub mod settings;

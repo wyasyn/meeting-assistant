@@ -20,8 +20,9 @@ Names here are the contract between UI, core, sidecar and providers. Changing on
 | `add_highlight` | `{ note? }` | `Highlight` | FR-9.1 |
 | `delete_meetings` | `{ ids?: string[], all?: boolean }` | `number` | NFR-15 |
 | `get_settings` / `set_settings` | none / `{ settings: Settings }` | `Settings` | FR-8.3, FR-8.5 |
-| `set_api_key` / `clear_api_key` | `{ provider, key? }` | `void` (stored in keychain) | FR-8.1 |
-| `test_provider` | `{ provider }` | `{ ok, message }` | FR-8.1 |
+| `list_providers` | none | `ProviderEntry[]` | FR-8.1 |
+| `set_api_key` / `clear_api_key` | `{ provider, key }` / `{ provider }` | `void` (stored in / removed from the keychain; the key is trimmed, blank is `invalid_state`) | FR-8.1 |
+| `test_provider` | `{ provider }` | `TestResult` (a refused or unreachable key is `ok: false`; only keychain failures are errors) | FR-8.1 |
 | `list_audio_devices` | — | `AudioDevice[]` | FR-2.3 |
 | `set_app_rule` | `{ sourceApp, rule: "ask" \| "always" \| "never" }` | `void` (`never` also closes that app's open prompt) | FR-1.7 |
 | `list_app_rules` | none | `AppRuleEntry[]` | FR-1.7 |
@@ -30,6 +31,8 @@ Names here are the contract between UI, core, sidecar and providers. Changing on
 `RecordingState { meetingId: string | null, state: "idle" | "recording" | "paused" | "stopped", elapsedMs, error: string | null }`: `idle` = nothing recorded since launch; `elapsedMs` counts recorded time only (paused time excluded); `error` explains a recording that stopped by itself.
 `AudioDevice { id, name, kind: "input" | "output", isDefault }` (`id` is the PipeWire `node.name` on Linux). Recording uses the system defaults until the FR-8.3 device setting exists.
 `AppRuleEntry { sourceApp, rule }`: one per known app (`zoom`, `slack`, `teams`, `discord`, `browser`), `ask` when none is set. Starting a recording from a prompt is `start_recording { sourceApp }` with no title; the core names it "<App> meeting".
+
+`ProviderEntry { provider: "gemini", hasKey }`: one per provider; the key itself is never sent to the UI. `TestResult { ok, message }`: `message` is readable either way.
 
 `Settings { startOnLogin: boolean }` for now; FR-8.3 fields (language, summary length, template, retention) join it later. `startOnLogin` is read from the OS login item, not stored in SQLite.
 
@@ -54,13 +57,16 @@ Names here are the contract between UI, core, sidecar and providers. Changing on
 pub trait Provider: Send + Sync {
     fn id(&self) -> ProviderId;
     fn capabilities(&self) -> Capabilities;            // stt, diarization, llm, embeddings, offline
+    async fn check(&self) -> Result<(), ProviderError>; // "Test key": a free call that proves the key works
     async fn transcribe(&self, req: TranscribeRequest) -> Result<TranscribeResult, ProviderError>;
     async fn analyze(&self, req: AnalyzeRequest) -> Result<AnalysisJson, ProviderError>;
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, ProviderError>;
     fn estimate_cost(&self, audio_seconds: u32, transcript_tokens: u32) -> f64;
 }
 ```
-`TranscribeRequest { audio_paths, language, diarize: bool, vocabulary }`: `audio_paths` are decrypted temporary Ogg Opus chunk files in time order (chunk format in `05-data-model.md`), deleted after the call → `TranscribeResult { segments: [{start_ms, end_ms, text, speaker_label?, words?}] }`.
+`TranscribeRequest { chunks: [{ path, start_ms }], language?, diarize: bool, vocabulary }`: `chunks` are decrypted temporary Ogg Opus chunk files in time order with their start in the meeting (chunk format in `05-data-model.md`), deleted by the caller after the call → `TranscribeResult { segments: [{start_ms, end_ms, text, speaker_label?}] }`, times in ms from the meeting start. Word timings are not returned yet.
+`ProviderError`: `Unavailable` → `provider_unavailable` (retryable), `Rejected` and `Unsupported` → `provider_rejected`, `InvalidOutput` → `invalid_llm_output` (retryable), a chunk that cannot be read → `storage`. Messages are readable and never hold keys, transcript text or paths.
+Gemini (ADR-020): `gemini-3.5-flash-lite` transcribes, `gemini-3.8-flash` analyzes; REST `generateContent` with the key in the `x-goog-api-key` header, JSON output constrained by `responseSchema`. `embed` is `Unsupported` for now.
 
 ## Sidecar HTTP (core → sidecar, 127.0.0.1, `Authorization: Bearer <token>`)
 | Method | Path | Body | Response |
