@@ -1,5 +1,6 @@
-//! Pipeline steps 2.2 (ADR-024): store the deterministic metrics, then ask the LLM for the
-//! report and save it with the action items (FR-4.1, FR-4.2, rule 5, rule 6).
+//! Pipeline steps 2.2 and 2.3 (ADR-024, ADR-025): store the deterministic metrics, then ask
+//! the LLM for the report and save it with the action items and the headline scores
+//! (FR-4.1, FR-4.2, FR-5.1 to FR-5.4, rule 5, rule 6).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -8,8 +9,8 @@ use serde_json::{json, Map, Value};
 
 use super::StepRunner;
 use crate::error::AppError;
-use crate::metrics::{self, Metrics, Timing};
-use crate::providers::analysis::AnalysisJson;
+use crate::metrics::{self, scoring, Metrics, Timing};
+use crate::providers::analysis::{AnalysisJson, Judged};
 use crate::providers::{AnalyzeRequest, ProviderId, ProviderService};
 use crate::store::meetings::{AnalysisInfo, MeetingRepo};
 use crate::store::reports::{NewActionItem, NewReport, NewScore, ReportRepo};
@@ -86,7 +87,8 @@ impl StepRunner for AnalyzeStep {
             .collect();
         analysis.resolve_segments(|r| ids.get(r).map(|id| (*id).to_owned()))?;
 
-        let (report, actions, scores) = to_rows(analysis, provider.analysis_model(), &info);
+        let (report, actions, scores) =
+            to_rows(analysis, provider.analysis_model(), &info, &metrics);
         ReportRepo::new(&*self.store.conn()?)
             .save_analysis(meeting_id, &report, &actions, &scores)?;
         tracing::info!(actions = actions.len(), "meeting analyzed");
@@ -185,11 +187,13 @@ fn non_blank(s: Option<String>) -> Option<String> {
 }
 
 /// The analysis as rows. A due date that is not YYYY-MM-DD and chapters outside the
-/// meeting are dropped rather than failing the whole analysis.
+/// meeting are dropped rather than failing the whole analysis. Headline scores combine the
+/// metrics with the judgements (docs/07) and keep their parts as evidence (rule 5).
 fn to_rows(
     analysis: AnalysisJson,
     model: String,
     info: &AnalysisInfo,
+    metrics: &Metrics,
 ) -> (NewReport, Vec<NewActionItem>, Vec<NewScore>) {
     let duration_ms = info.duration_s.map(|s| s * 1000);
     let chapters: Vec<_> = analysis
@@ -207,19 +211,7 @@ fn to_rows(
         model_used: model,
         cost_usd: None,
     };
-    let scores = vec![
-        NewScore {
-            kind: "metric:action_items_count".into(),
-            value: analysis.action_items.len() as f64,
-            evidence: json!({}),
-        },
-        NewScore {
-            kind: "metric:decisions_count".into(),
-            value: analysis.decisions.len() as f64,
-            evidence: json!({}),
-        },
-    ];
-    let actions = analysis
+    let actions: Vec<NewActionItem> = analysis
         .action_items
         .into_iter()
         .filter(|a| !a.task.trim().is_empty())
@@ -230,7 +222,68 @@ fn to_rows(
             segment_id: a.segment_id,
         })
         .collect();
+    let mut scores = vec![
+        NewScore {
+            kind: "metric:action_items_count".into(),
+            value: actions.len() as f64,
+            evidence: json!({}),
+        },
+        NewScore {
+            kind: "metric:decisions_count".into(),
+            value: analysis.decisions.len() as f64,
+            evidence: json!({}),
+        },
+    ];
+    let judged = &analysis.scores;
+    let inputs = scoring::Inputs {
+        metrics,
+        timing: timing(info),
+        template: &info.template,
+        judgements: scoring::Judgements {
+            value: f64::from(judged.value.score),
+            engagement_quality: f64::from(judged.engagement_quality.score),
+            my_contribution: f64::from(judged.my_contribution.score),
+            productivity: f64::from(judged.productivity.score),
+        },
+        decisions: analysis.decisions.len(),
+        action_items: actions.len(),
+    };
+    let headlines = scoring::score(&inputs, &scoring::DEFAULT_CONFIG).unwrap_or_default();
+    scores.extend(headlines.into_iter().map(|h| {
+        let llm = match h.kind {
+            "engagement" => &judged.engagement_quality,
+            "value" => &judged.value,
+            "my_performance" => &judged.my_contribution,
+            _ => &judged.productivity,
+        };
+        NewScore {
+            kind: h.kind.to_owned(),
+            value: h.value,
+            evidence: evidence(&h, llm),
+        }
+    }));
     (report, actions, scores)
+}
+
+/// `{ metrics, parts, segment_ids, rationale }` (docs/05 `scores.evidence`).
+fn evidence(headline: &scoring::Headline, llm: &Judged) -> Value {
+    let metrics: Map<String, Value> = headline
+        .parts
+        .iter()
+        .filter_map(|p| p.metric)
+        .map(|(name, value)| (name.to_owned(), json!(value)))
+        .collect();
+    let parts: Vec<Value> = headline
+        .parts
+        .iter()
+        .map(|p| json!({ "name": p.name, "weight": p.weight, "score": round2(p.score) }))
+        .collect();
+    json!({
+        "metrics": metrics,
+        "parts": parts,
+        "segment_ids": llm.segment_ids,
+        "rationale": llm.rationale.trim(),
+    })
 }
 
 #[cfg(test)]
@@ -480,6 +533,79 @@ mod tests {
         // A rerun replaces rather than adds.
         h.analyze(answer).unwrap();
         assert_eq!((h.count("reports"), h.count("action_items")), (1, 2));
+    }
+
+    fn headline_scores(h: &Harness) -> Vec<(String, f64, Value)> {
+        let conn = h.store.conn().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT kind, value, evidence FROM scores
+                 WHERE meeting_id = ?1 AND kind NOT LIKE 'metric:%' ORDER BY kind",
+            )
+            .unwrap();
+        stmt.query_map([&h.meeting_id], |r| {
+            let evidence: String = r.get(2)?;
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                serde_json::from_str(&evidence).unwrap(),
+            ))
+        })
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
+    }
+
+    #[test]
+    fn fr_5_1_to_5_4_headline_scores_are_saved_with_their_evidence() {
+        let h = Harness::new();
+        // Enough words from the other side to score (docs/07).
+        let long = vec!["word"; 60].join(" ");
+        SegmentRepo::new(&h.store.conn().unwrap())
+            .replace_track(
+                &h.meeting_id,
+                Track::Sys,
+                &[NewSegment {
+                    start_ms: 0,
+                    end_ms: 20_000,
+                    text: long,
+                    speaker_label: Some("Speaker 1".into()),
+                }],
+            )
+            .unwrap();
+        let mut answer = sample();
+        answer["scores"]["value"] = json!({
+            "score": 81, "rationale": " Clear outcome. ", "segment_ids": ["s2"]
+        });
+        h.analyze(answer).unwrap();
+
+        let scores = headline_scores(&h);
+        let kinds: Vec<_> = scores.iter().map(|(k, _, _)| k.as_str()).collect();
+        assert_eq!(
+            kinds,
+            ["engagement", "my_performance", "productivity", "value"]
+        );
+        let (_, value, evidence) = &scores[3];
+        // 60%·81 + 20%·(1/5·100) + 20%·(1/8·100) = 48.6 + 4 + 2.5, rounded
+        assert_eq!(*value, 55.0);
+        assert_eq!(evidence["rationale"], "Clear outcome.");
+        assert_eq!(evidence["segment_ids"], json!([h.segment_id(1)]));
+        assert_eq!(evidence["metrics"]["decisions_count"], json!(1.0));
+        let parts: Vec<_> = evidence["parts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(parts, ["llm", "decisions", "action_items"]);
+    }
+
+    #[test]
+    fn too_little_data_saves_the_report_without_scores() {
+        let h = Harness::new();
+        h.analyze(sample()).unwrap();
+        assert!(headline_scores(&h).is_empty());
+        assert_eq!(h.count("reports"), 1);
     }
 
     #[test]

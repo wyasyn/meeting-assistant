@@ -88,7 +88,7 @@ CREATE TABLE scores (
   meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
   kind TEXT NOT NULL,                   -- engagement | value | my_performance | productivity | metric:<name>
   value REAL NOT NULL,                  -- 0–100 for scores; raw for metrics
-  evidence TEXT NOT NULL,               -- JSON {metrics:{}, segment_ids:[], rationale:""}
+  evidence TEXT NOT NULL,               -- JSON {metrics:{}, parts:[{name,weight,score}], segment_ids:[], rationale:""}; {} for metric rows
   created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
   UNIQUE(meeting_id, kind)
 );

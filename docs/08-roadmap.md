@@ -29,7 +29,7 @@ Agents: pick the first unchecked task in the current phase, do only that, tick i
 ## Phase 2 — Summarise and score
 - [x] 2.1 `metrics/` module with table-driven tests (all metrics in `07-scoring.md`).
 - [x] 2.2 Analysis prompt + JSON schema validation + retry on invalid output (FR-4.1, FR-4.2).
-- [ ] 2.3 Score combination and storage with evidence (FR-5.1–5.4).
+- [x] 2.3 Score combination and storage with evidence (FR-5.1–5.4).
 - [ ] 2.4 Report view: summary, decisions, action items, four scores with "why", suggestions (FR-4.3, FR-5.5).
 - [ ] 2.5 Meeting library list with scores (FR-6.1).
 - [ ] 2.6 Export Markdown + PDF; copy for Slack/email (FR-7.1, FR-7.2).

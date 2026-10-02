@@ -1,6 +1,9 @@
 //! Deterministic meeting metrics: talk ratio, wpm, fillers, interruptions (docs/07-scoring.md).
 //! Pure functions of the transcript and the meeting's timing; the LLM never computes these
 //! (rule 5). "Me" is the mic track (rule 4). See ADR-023 for how the edge cases are read.
+//! `scoring` combines them with the LLM's judgements into the headline scores.
+
+pub mod scoring;
 
 use std::collections::BTreeMap;
 
@@ -54,6 +57,9 @@ pub struct Metrics {
     pub silence_ratio: Option<f64>,
     /// Percent over the scheduled length; negative when the meeting ended early.
     pub overrun_pct: Option<f64>,
+    /// Words from the system track; too few means too little data to score (docs/07).
+    /// Not stored as a metric.
+    pub others_word_count: usize,
 }
 
 impl Metrics {
@@ -150,6 +156,11 @@ pub fn compute(segments: &[Segment], timing: Timing) -> Metrics {
     let my_word_count: usize = my_words.iter().map(Vec::len).sum();
     let my_fillers: usize = my_words.iter().map(|w| filler_count(w)).sum();
     let my_ms: i64 = mine.iter().map(|s| (s.end_ms - s.start_ms).max(0)).sum();
+    let others_word_count = ordered
+        .iter()
+        .filter(|s| !is_me(s))
+        .map(|s| words(&s.text).len())
+        .sum();
 
     Metrics {
         talk_share,
@@ -171,6 +182,7 @@ pub fn compute(segments: &[Segment], timing: Timing) -> Metrics {
             .scheduled_ms
             .filter(|s| *s > 0)
             .map(|s| ratio(timing.duration_ms - s, s) * 100.0),
+        others_word_count,
     }
 }
 
@@ -538,6 +550,7 @@ mod tests {
             MINUTE,
         );
         assert_eq!((m.questions_total, m.my_questions), (3, 1));
+        assert_eq!(m.others_word_count, 4);
     }
 
     #[test]
